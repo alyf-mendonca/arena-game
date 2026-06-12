@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arena de Aço &amp; Magia — Online</title>
+<style>
+  :root{
+    --parchment:#ead9b0; --ink:#33240f; --blood:#8c2b1e; --gold:#caa84e;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#1d2b1c;
+    font-family:Georgia,'Times New Roman',serif;color:var(--ink)}
+  canvas{display:block}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,#2c4327 0%,#16210f 80%);z-index:10}
+  .scroll-card{background:var(--parchment);border:4px solid var(--ink);
+    box-shadow:0 0 0 3px var(--parchment),0 18px 50px rgba(0,0,0,.6);
+    padding:34px 40px;max-width:560px;width:92%;text-align:center;position:relative}
+  .scroll-card::before,.scroll-card::after{content:"";position:absolute;left:-4px;right:-4px;height:10px;
+    background:repeating-linear-gradient(90deg,var(--ink) 0 14px,transparent 14px 22px)}
+  .scroll-card::before{top:-14px}.scroll-card::after{bottom:-14px}
+  h1{font-size:30px;letter-spacing:1px;color:var(--blood);text-transform:uppercase}
+  h1 small{display:block;font-size:12px;letter-spacing:4px;color:var(--ink);margin-top:4px}
+  .name-row{margin:22px 0 14px}
+  input[type=text]{width:100%;padding:11px 14px;font-family:inherit;font-size:17px;
+    background:#f6ecd4;border:3px solid var(--ink);color:var(--ink);text-align:center;outline:none}
+  input[type=text]:focus{border-color:var(--blood)}
+  .classes{display:flex;gap:14px;margin:8px 0 18px}
+  .class-card{flex:1;border:3px solid var(--ink);background:#f3e7c9;padding:14px 10px;cursor:pointer;transition:transform .08s}
+  .class-card:hover{transform:translateY(-2px)}
+  .class-card.sel{background:var(--ink);color:var(--parchment)}
+  .class-card h2{font-size:19px;margin-bottom:6px}
+  .class-card p{font-size:12.5px;line-height:1.45}
+  .class-card .ico{font-size:30px;display:block;margin-bottom:4px}
+  button.go{font-family:inherit;font-size:18px;letter-spacing:2px;text-transform:uppercase;
+    background:var(--blood);color:var(--parchment);border:3px solid var(--ink);padding:12px 36px;cursor:pointer}
+  button.go:hover{background:#a93a29}
+  button.go:disabled{opacity:.55;cursor:wait}
+  .rules{font-size:12px;line-height:1.6;text-align:left;margin-top:18px;border-top:2px solid var(--ink);
+    padding-top:10px;column-count:2;column-gap:24px}
+  .rules b{color:var(--blood)}
+  #hud{position:fixed;left:14px;bottom:14px;z-index:5;display:none;min-width:260px;
+    background:rgba(20,14,4,.78);border:2px solid var(--gold);padding:10px 14px;color:var(--parchment)}
+  #hud .nm{font-size:15px;letter-spacing:1px}
+  .bar{height:14px;border:2px solid #000;background:#1a1208;margin-top:6px;position:relative}
+  .bar i{display:block;height:100%;transition:width .15s}
+  #hpfill{background:linear-gradient(#d8543c,#8c2b1e)}
+  #xpfill{background:linear-gradient(#e8cf76,#b78f2e)}
+  .bar span{position:absolute;inset:0;text-align:center;font-size:10px;line-height:11px;
+    font-family:monospace;color:#fff;text-shadow:0 1px 2px #000}
+  #dmgline{font-size:12px;margin-top:6px;font-family:monospace;color:var(--gold)}
+  #boards{position:fixed;right:14px;top:14px;z-index:5;display:none;width:225px}
+  .board{background:rgba(20,14,4,.78);border:2px solid var(--gold);margin-bottom:12px;color:var(--parchment)}
+  .board h3{font-size:12px;letter-spacing:2px;text-transform:uppercase;text-align:center;
+    background:var(--blood);padding:5px;border-bottom:2px solid var(--gold)}
+  .board ol{list-style:none;padding:6px 10px;font-family:monospace;font-size:12px}
+  .board li{display:flex;justify-content:space-between;padding:2px 0;white-space:nowrap;overflow:hidden}
+  .board li.me{color:var(--gold);font-weight:bold}
+  #feed{position:fixed;left:14px;top:14px;z-index:5;display:none;width:300px;font-family:monospace;
+    font-size:12px;color:#e8d8b0;text-shadow:0 1px 3px #000;pointer-events:none}
+  #feed div{margin-bottom:3px;opacity:.95}
+  #death{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;
+    background:rgba(40,5,5,.55)}
+  #death .scroll-card{max-width:420px}
+  #death h1{font-size:26px}
+  #death p{margin:12px 0;font-size:15px}
+  #conn{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:6;display:none;
+    background:#8c2b1e;color:#fff;font-family:monospace;font-size:12px;padding:6px 14px;border:2px solid #000}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="overlay" id="start">
+  <div class="scroll-card">
+    <h1>Arena de Aço &amp; Magia<small>servidor online · todos contra todos</small></h1>
+    <div class="name-row">
+      <input id="nameInput" type="text" maxlength="14" placeholder="Escreva seu nome, guerreiro..." autocomplete="off">
+    </div>
+    <div class="classes">
+      <div class="class-card sel" data-class="knight">
+        <span class="ico">⚔️</span><h2>Knight</h2>
+        <p>300 de vida<br>Dano 8 (corpo a corpo)<br>Regenera 1% / 3s<br>Mais rápido</p>
+      </div>
+      <div class="class-card" data-class="wizard">
+        <span class="ico">🔮</span><h2>Wizard</h2>
+        <p>100 de vida<br>Dano 2 (à distância)<br>Regenera 2% / 3s<br>Mais frágil</p>
+      </div>
+    </div>
+    <button class="go" id="playBtn">Entrar na arena</button>
+    <div class="rules">
+      <p><b>WASD</b> move · <b>clique</b> ataca na direção do mouse (velocidade = seu clique).</p>
+      <p><b>Dano dobra</b> a cada nível. XP para subir também dobra.</p>
+      <p><b>Last hit</b> rouba TODO o XP da vítima — só vale até <b>3 níveis</b> de diferença.</p>
+      <p><b>Monstros</b> escalam com a arena. Elites ◆ e Chefes 👑 exigem grupo — mas só o last hit leva o XP.</p>
+      <p>Morreu? Volta ao <b>nível 1</b> com escudo de renascimento.</p>
+    </div>
+  </div>
+</div>
+
+<div id="death">
+  <div class="scroll-card">
+    <h1>Você caiu!</h1>
+    <p id="deathInfo"></p>
+    <p style="font-family:monospace" id="deathTimer"></p>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="nm" id="hudName"></div>
+  <div class="bar"><i id="hpfill"></i><span id="hptxt"></span></div>
+  <div class="bar"><i id="xpfill"></i><span id="xptxt"></span></div>
+  <div id="dmgline"></div>
+</div>
+
+<div id="boards">
+  <div class="board"><h3>🏆 Ranking · Nível</h3><ol id="lvlBoard"></ol></div>
+  <div class="board"><h3>💀 Ranking · Abates</h3><ol id="killBoard"></ol></div>
+</div>
+<div id="feed"></div>
+<div id="conn">reconectando ao servidor...</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+/* Cliente "burro": envia intenções, desenha o que o servidor manda. */
+const CLASSES = {
+  knight:{hp:300, dmg:8, range:56,  color:'#aeb6c2'},
+  wizard:{hp:100, dmg:2, range:640, color:'#7c5cc4'}
+};
+const XP_LVL = l => 10*(Math.pow(2,l-1)-1);
+const dmgAt = (b,l)=> b*Math.pow(2,l-1);
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let VW=0,VH=0;
+function resize(){ VW=cv.width=innerWidth; VH=cv.height=innerHeight; }
+addEventListener('resize',resize); resize();
+
+const socket = io();
+let myId = null, world = null, state = null;
+const renderPos = new Map();           // id -> {x,y} interpolado
+const tufts = [];
+const floaters = [];
+const cam = {x:0,y:0};
+let joined = false;
+
+socket.on('connect', ()=>{ document.getElementById('conn').style.display='none'; });
+socket.on('disconnect', ()=>{ if(joined) document.getElementById('conn').style.display='block'; });
+
+socket.on('init', d => {
+  myId = d.id; world = d.world;
+  tufts.length = 0;
+  for (let i=0;i<260;i++) tufts.push({x:Math.random()*world.W, y:Math.random()*world.H, s:3+Math.random()*4});
+  document.getElementById('start').style.display='none';
+  document.getElementById('hud').style.display='block';
+  document.getElementById('boards').style.display='block';
+  document.getElementById('feed').style.display='block';
+  joined = true;
+  requestAnimationFrame(loop);
+});
+
+socket.on('state', s => {
+  state = s;
+  for (const f of s.fx) floaters.push({...f, t:performance.now()});
+});
+
+socket.on('killed', d => {
+  const el = document.getElementById('death');
+  document.getElementById('deathInfo').textContent =
+    'Abatido por '+d.by+'. Todo o seu XP foi para o vencedor.';
+  el.style.display='flex';
+  const timerEl = document.getElementById('deathTimer');
+  const iv = setInterval(()=>{
+    const left = Math.max(0,(d.respawnAt-Date.now())/1000);
+    timerEl.textContent = 'Renascendo em '+left.toFixed(1)+'s...';
+    if (left<=0){ clearInterval(iv); el.style.display='none'; }
+  },100);
+});
+
+const feedEl = document.getElementById('feed');
+socket.on('log', msg => {
+  const div = document.createElement('div');
+  div.textContent = msg;
+  feedEl.prepend(div);
+  while (feedEl.children.length > 6) feedEl.lastChild.remove();
+  setTimeout(()=>{ if(div.parentNode) div.remove(); }, 8000);
+});
+
+/* ---------- input ---------- */
+const keys = {};
+let lastDir = {x:0,y:0};
+function sendDir(){
+  if (!joined) return;
+  let x=0,y=0;
+  if (keys['w']||keys['arrowup'])y-=1;
+  if (keys['s']||keys['arrowdown'])y+=1;
+  if (keys['a']||keys['arrowleft'])x-=1;
+  if (keys['d']||keys['arrowright'])x+=1;
+  if (x||y){ const n=Math.hypot(x,y); x/=n; y/=n; }
+  if (x!==lastDir.x || y!==lastDir.y){ lastDir={x,y}; socket.emit('move',{x,y}); }
+}
+addEventListener('keydown', e=>{ keys[e.key.toLowerCase()]=true; sendDir(); });
+addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()]=false; sendDir(); });
+let mouse={x:0,y:0};
+cv.addEventListener('mousemove', e=>{ mouse.x=e.clientX; mouse.y=e.clientY; });
+cv.addEventListener('mousedown', e=>{
+  if (!joined) return;
+  socket.emit('attack', {x:cam.x+e.clientX, y:cam.y+e.clientY});
+});
+addEventListener('contextmenu', e=>e.preventDefault());
+
+/* ---------- interpolação ---------- */
+function lerpEnt(id, tx, ty, dt){
+  let r = renderPos.get(id);
+  if (!r){ r={x:tx,y:ty}; renderPos.set(id,r); }
+  const k = Math.min(1, dt*14);
+  r.x += (tx-r.x)*k; r.y += (ty-r.y)*k;
+  return r;
+}
+
+/* ---------- loop de desenho ---------- */
+let lastT = performance.now(), lastBoard = 0;
+function loop(){
+  const t = performance.now(), dt = Math.min(0.05,(t-lastT)/1000); lastT = t;
+  if (state && world) draw(t, dt);
+  if (t-lastBoard>500 && state){ lastBoard=t; updateBoards(); updateHud(); }
+  requestAnimationFrame(loop);
+}
+
+function me(){ return state ? state.players.find(p=>p.id===myId) : null; }
+
+function draw(t, dt){
+  const m = me();
+  if (m){
+    const r = lerpEnt(m.id, m.x, m.y, dt);
+    cam.x = Math.max(0, Math.min(world.W-VW, r.x-VW/2));
+    cam.y = Math.max(0, Math.min(world.H-VH, r.y-VH/2));
+  }
+  ctx.fillStyle = '#4d8a4f'; ctx.fillRect(0,0,VW,VH);
+  ctx.save(); ctx.translate(-cam.x,-cam.y);
+  ctx.fillStyle = '#447c46';
+  for (const g of tufts){
+    if (g.x<cam.x-20||g.x>cam.x+VW+20||g.y<cam.y-20||g.y>cam.y+VH+20) continue;
+    ctx.fillRect(g.x,g.y,g.s,g.s*0.6);
+  }
+  ctx.strokeStyle='#2a1d10'; ctx.lineWidth=14; ctx.strokeRect(7,7,world.W-14,world.H-14);
+
+  // monstros
+  for (const mo of state.monsters){
+    const r = lerpEnt(mo.id, mo.x, mo.y, dt);
+    if (mo.tier==='boss'){
+      ctx.strokeStyle='rgba(220,80,80,.45)'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(r.x,r.y,mo.r+9+Math.sin(t/160)*3,0,7); ctx.stroke();
+    }
+    ctx.fillStyle = mo.tier==='boss'?'#8c2b3e':mo.tier==='elite'?'#b06a32':'#6da93c';
+    ctx.beginPath(); ctx.arc(r.x,r.y,mo.r,0,7); ctx.fill();
+    ctx.strokeStyle='#22301a'; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.fillStyle = mo.tier==='boss'?'#ffd14e':'#1c1c1c';
+    const er = 2.4+(mo.tier==='boss'?1.2:0);
+    ctx.beginPath(); ctx.arc(r.x-mo.r*0.32,r.y-3,er,0,7); ctx.arc(r.x+mo.r*0.32,r.y-3,er,0,7); ctx.fill();
+    const bw = mo.tier==='normal'?34:mo.tier==='elite'?50:76;
+    drawBar(r.x, r.y-mo.r-12, mo.hp/mo.hpMax, bw);
+    const tag = mo.tier==='boss'?'👑 ':mo.tier==='elite'?'◆ ':'';
+    label(r.x, r.y-mo.r-18, tag+mo.name+' nv'+mo.level, mo.tier==='boss'?'#ffb4b4':'#d8e8c8', mo.tier==='boss'?12:10);
+  }
+
+  // jogadores
+  for (const p of state.players){
+    if (!p.alive) continue;
+    const r = lerpEnt(p.id, p.x, p.y, dt);
+    const c = CLASSES[p.cls];
+    if (p.inv){
+      ctx.strokeStyle='rgba(150,210,255,.8)'; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.arc(r.x,r.y,24+Math.sin(t/120)*2,0,7); ctx.stroke();
+    }
+    const ang = (p.id===myId) ? Math.atan2(cam.y+mouse.y-r.y, cam.x+mouse.x-r.x) : p.ang;
+    ctx.fillStyle = c.color;
+    ctx.beginPath(); ctx.arc(r.x,r.y,16,0,7); ctx.fill();
+    ctx.lineWidth=3; ctx.strokeStyle = p.id===myId?'#ffd968':'#26190c'; ctx.stroke();
+    if (p.cls==='knight'){
+      ctx.fillStyle='#7d8694'; ctx.fillRect(r.x-10,r.y-7,20,5);
+      const sw = Math.max(0, 1-(Date.now()-p.swing)/180);
+      const sa = ang + (sw>0 ? (-0.9+1.8*(1-sw)) : 0.35);
+      ctx.strokeStyle='#e8e8ee'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(r.x+Math.cos(sa)*12, r.y+Math.sin(sa)*12);
+      ctx.lineTo(r.x+Math.cos(sa)*40, r.y+Math.sin(sa)*40); ctx.stroke();
+      ctx.strokeStyle='#8a6a2c'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.moveTo(r.x+Math.cos(sa)*10, r.y+Math.sin(sa)*10);
+      ctx.lineTo(r.x+Math.cos(sa)*16, r.y+Math.sin(sa)*16); ctx.stroke();
+    } else {
+      ctx.fillStyle='#4a3380';
+      ctx.beginPath(); ctx.moveTo(r.x-15,r.y-8); ctx.lineTo(r.x+15,r.y-8); ctx.lineTo(r.x,r.y-30); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#caa84e'; ctx.fillRect(r.x-15,r.y-10,30,3.5);
+      ctx.strokeStyle='#5d4326'; ctx.lineWidth=3.5;
+      ctx.beginPath(); ctx.moveTo(r.x+Math.cos(ang)*8, r.y+Math.sin(ang)*8);
+      ctx.lineTo(r.x+Math.cos(ang)*30, r.y+Math.sin(ang)*30); ctx.stroke();
+      ctx.fillStyle='#bda1ff';
+      ctx.beginPath(); ctx.arc(r.x+Math.cos(ang)*30, r.y+Math.sin(ang)*30, 4.5, 0, 7); ctx.fill();
+    }
+    drawBar(r.x, r.y-30, p.hp/p.hpMax, 44);
+    label(r.x, r.y-37, (p.id===myId?'★ ':'')+p.name+' · nv'+p.level, p.id===myId?'#ffe27a':'#f4ead0', 11);
+  }
+
+  // projéteis
+  for (const pr of state.projectiles){
+    ctx.fillStyle='rgba(190,160,255,.35)';
+    ctx.beginPath(); ctx.arc(pr.x,pr.y,11,0,7); ctx.fill();
+    ctx.fillStyle='#d9c8ff';
+    ctx.beginPath(); ctx.arc(pr.x,pr.y,5.5,0,7); ctx.fill();
+  }
+
+  // decoração
+  for (const d of world.decor){
+    if (d.t==='tree'){
+      ctx.fillStyle='#54401f'; ctx.fillRect(d.x-5,d.y-4,10,14);
+      ctx.fillStyle='#2f6332'; ctx.beginPath(); ctx.arc(d.x,d.y-16,26,0,7); ctx.fill();
+      ctx.fillStyle='#3a7a3e'; ctx.beginPath(); ctx.arc(d.x-8,d.y-22,14,0,7); ctx.fill();
+    } else {
+      ctx.fillStyle='#8d8d85'; ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,7); ctx.fill();
+      ctx.fillStyle='#a5a59c'; ctx.beginPath(); ctx.arc(d.x-5,d.y-5,d.r*0.45,0,7); ctx.fill();
+    }
+  }
+
+  // textos flutuantes
+  for (let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i], age = (t-f.t)/1000;
+    if (age>1.1){ floaters.splice(i,1); continue; }
+    ctx.globalAlpha = 1-age/1.1;
+    ctx.font = (f.big?'bold 17px':'bold 13px')+' monospace'; ctx.textAlign='center';
+    ctx.fillStyle='#000'; ctx.fillText(f.txt, f.x+1, f.y-age*38+1);
+    ctx.fillStyle=f.color; ctx.fillText(f.txt, f.x, f.y-age*38);
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+function drawBar(x,y,pct,w){
+  ctx.fillStyle='#1a1208'; ctx.fillRect(x-w/2-1,y-1,w+2,7);
+  ctx.fillStyle = pct>0.5?'#5ecf5e':pct>0.25?'#e8c84e':'#d8543c';
+  ctx.fillRect(x-w/2,y,w*Math.max(0,pct),5);
+}
+function label(x,y,txt,color,size){
+  ctx.font='bold '+size+'px monospace'; ctx.textAlign='center';
+  ctx.fillStyle='rgba(0,0,0,.65)'; ctx.fillText(txt,x+1,y+1);
+  ctx.fillStyle=color; ctx.fillText(txt,x,y);
+}
+
+/* ---------- HUD / rankings ---------- */
+function updateHud(){
+  const m = me(); if (!m) return;
+  document.getElementById('hudName').textContent =
+    m.name+' · '+(m.cls==='knight'?'⚔️ Knight':'🔮 Wizard')+' · Nível '+m.level;
+  document.getElementById('hpfill').style.width=(100*m.hp/m.hpMax)+'%';
+  document.getElementById('hptxt').textContent=m.hp+' / '+m.hpMax+' HP';
+  const cur=XP_LVL(m.level), next=XP_LVL(m.level+1);
+  document.getElementById('xpfill').style.width=(100*(m.xp-cur)/(next-cur))+'%';
+  document.getElementById('xptxt').textContent=m.xp+' / '+next+' XP';
+  document.getElementById('dmgline').textContent=
+    'Dano: '+dmgAt(CLASSES[m.cls].dmg,m.level)+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
+}
+function boardHtml(list, fn){
+  return list.slice(0,7).map(p=>
+    '<li class="'+(p.id===myId?'me':'')+'"><span>'+p.name+(p.bot?' 🤖':'')+'</span><span>'+fn(p)+'</span></li>').join('');
+}
+function updateBoards(){
+  const byLvl=[...state.players].sort((a,b)=>b.level-a.level||b.xp-a.xp);
+  const byKill=[...state.players].sort((a,b)=>b.kills-a.kills||b.level-a.level);
+  document.getElementById('lvlBoard').innerHTML=boardHtml(byLvl,p=>'nv '+p.level);
+  document.getElementById('killBoard').innerHTML=boardHtml(byKill,p=>p.kills+' ⚔');
+}
+
+/* ---------- início ---------- */
+let chosenClass='knight';
+document.querySelectorAll('.class-card').forEach(c=>c.addEventListener('click',()=>{
+  document.querySelectorAll('.class-card').forEach(o=>o.classList.remove('sel'));
+  c.classList.add('sel'); chosenClass=c.dataset.class;
+}));
+function joinGame(){
+  const name=document.getElementById('nameInput').value.trim()||'Sem Nome';
+  document.getElementById('playBtn').disabled=true;
+  socket.emit('join',{name, cls:chosenClass});
+}
+document.getElementById('playBtn').addEventListener('click',joinGame);
+document.getElementById('nameInput').addEventListener('keydown',e=>{ if(e.key==='Enter') joinGame(); });
+</script>
+</body>
+</html>
