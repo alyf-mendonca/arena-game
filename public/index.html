@@ -5,9 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Arena de Aço &amp; Magia — Online</title>
 <style>
-  :root{
-    --parchment:#ead9b0; --ink:#33240f; --blood:#8c2b1e; --gold:#caa84e;
-  }
+  :root{ --parchment:#ead9b0; --ink:#33240f; --blood:#8c2b1e; --gold:#caa84e; }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;overflow:hidden;background:#1d2b1c;
     font-family:Georgia,'Times New Roman',serif;color:var(--ink)}
@@ -16,7 +14,7 @@
     background:radial-gradient(ellipse at center,#2c4327 0%,#16210f 80%);z-index:10}
   .scroll-card{background:var(--parchment);border:4px solid var(--ink);
     box-shadow:0 0 0 3px var(--parchment),0 18px 50px rgba(0,0,0,.6);
-    padding:34px 40px;max-width:560px;width:92%;text-align:center;position:relative}
+    padding:34px 40px;max-width:580px;width:92%;text-align:center;position:relative}
   .scroll-card::before,.scroll-card::after{content:"";position:absolute;left:-4px;right:-4px;height:10px;
     background:repeating-linear-gradient(90deg,var(--ink) 0 14px,transparent 14px 22px)}
   .scroll-card::before{top:-14px}.scroll-card::after{bottom:-14px}
@@ -40,7 +38,7 @@
   .rules{font-size:12px;line-height:1.6;text-align:left;margin-top:18px;border-top:2px solid var(--ink);
     padding-top:10px;column-count:2;column-gap:24px}
   .rules b{color:var(--blood)}
-  #hud{position:fixed;left:14px;bottom:14px;z-index:5;display:none;min-width:260px;
+  #hud{position:fixed;left:14px;bottom:14px;z-index:5;display:none;min-width:280px;
     background:rgba(20,14,4,.78);border:2px solid var(--gold);padding:10px 14px;color:var(--parchment)}
   #hud .nm{font-size:15px;letter-spacing:1px}
   .bar{height:14px;border:2px solid #000;background:#1a1208;margin-top:6px;position:relative}
@@ -51,13 +49,16 @@
     font-family:monospace;color:#fff;text-shadow:0 1px 2px #000}
   #dmgline{font-size:12px;margin-top:6px;font-family:monospace;color:var(--gold)}
   #boards{position:fixed;right:14px;top:14px;z-index:5;display:none;width:225px}
+  #online{background:rgba(20,14,4,.78);border:2px solid var(--gold);color:var(--parchment);
+    font-family:monospace;font-size:13px;text-align:center;padding:6px;margin-bottom:12px}
   .board{background:rgba(20,14,4,.78);border:2px solid var(--gold);margin-bottom:12px;color:var(--parchment)}
   .board h3{font-size:12px;letter-spacing:2px;text-transform:uppercase;text-align:center;
     background:var(--blood);padding:5px;border-bottom:2px solid var(--gold)}
+  .board h3 small{display:block;font-size:9px;letter-spacing:1px;text-transform:none;opacity:.85}
   .board ol{list-style:none;padding:6px 10px;font-family:monospace;font-size:12px}
   .board li{display:flex;justify-content:space-between;padding:2px 0;white-space:nowrap;overflow:hidden}
   .board li.me{color:var(--gold);font-weight:bold}
-  #feed{position:fixed;left:14px;top:14px;z-index:5;display:none;width:300px;font-family:monospace;
+  #feed{position:fixed;left:14px;top:14px;z-index:5;display:none;width:320px;font-family:monospace;
     font-size:12px;color:#e8d8b0;text-shadow:0 1px 3px #000;pointer-events:none}
   #feed div{margin-bottom:3px;opacity:.95}
   #death{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;
@@ -67,6 +68,9 @@
   #death p{margin:12px 0;font-size:15px}
   #conn{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:6;display:none;
     background:#8c2b1e;color:#fff;font-family:monospace;font-size:12px;padding:6px 14px;border:2px solid #000}
+  #mute{position:fixed;right:14px;bottom:14px;z-index:6;display:none;cursor:pointer;
+    background:rgba(20,14,4,.78);border:2px solid var(--gold);color:var(--parchment);
+    font-size:16px;padding:6px 10px;font-family:monospace}
 </style>
 </head>
 <body>
@@ -81,20 +85,21 @@
     <div class="classes">
       <div class="class-card sel" data-class="knight">
         <span class="ico">⚔️</span><h2>Knight</h2>
-        <p>300 de vida<br>Dano 8 (corpo a corpo)<br>Regenera 1% / 3s<br>Mais rápido</p>
+        <p>300 de vida, <b>cresce a cada nível</b><br>Dano 8 corpo a corpo<br>Investida com <b>Espaço</b><br>Regenera 1% / 3s</p>
       </div>
       <div class="class-card" data-class="wizard">
         <span class="ico">🔮</span><h2>Wizard</h2>
-        <p>100 de vida<br>Dano 2 (à distância)<br>Regenera 2% / 3s<br>Mais frágil</p>
+        <p>100 de vida<br>Dano 2 à distância<br><b>Mais ágil</b> e projétil veloz<br>Regenera 2% / 3s</p>
       </div>
     </div>
     <button class="go" id="playBtn">Entrar na arena</button>
     <div class="rules">
-      <p><b>WASD</b> move · <b>clique</b> ataca na direção do mouse (velocidade = seu clique).</p>
-      <p><b>Dano dobra</b> a cada nível. XP para subir também dobra.</p>
-      <p><b>Last hit</b> rouba TODO o XP da vítima — só vale até <b>3 níveis</b> de diferença.</p>
-      <p><b>Monstros</b> escalam com a arena. Elites ◆ e Chefes 👑 exigem grupo — mas só o last hit leva o XP.</p>
-      <p>Morreu? Volta ao <b>nível 1</b> com escudo de renascimento.</p>
+      <p><b>WASD</b> move · <b>clique</b> ataca · <b>Espaço</b> investida (Knight) · <b>M</b> som.</p>
+      <p>Cadência máxima: Knight 1 golpe/0,3s, Wizard 1 disparo/0,48s — clicar mais rápido não passa do teto.</p>
+      <p><b>Dano dobra</b> a cada nível. Do nv6 em diante a <b>velocidade cai</b> um pouco por nível, e quem foge muito da média da arena <b>toma dano extra</b>.</p>
+      <p><b>Last hit</b> rouba TODO o XP da vítima (mín. 5). Matar quem está <b>acima</b> sempre vale; só não vale farmar quem está 4+ níveis abaixo.</p>
+      <p><b>Abates zeram ao morrer</b> — o ranking é da vida atual.</p>
+      <p>O <b>Chefe 👑</b> nasce 2 níveis acima do líder, persegue o maior nível da arena e tem Pancada em área, Bola de Fogo e Fúria.</p>
     </div>
   </div>
 </div>
@@ -115,20 +120,22 @@
 </div>
 
 <div id="boards">
+  <div id="online">🟢 — online</div>
   <div class="board"><h3>🏆 Ranking · Nível</h3><ol id="lvlBoard"></ol></div>
-  <div class="board"><h3>💀 Ranking · Abates</h3><ol id="killBoard"></ol></div>
+  <div class="board"><h3>💀 Ranking · Abates<small>vale só enquanto você viver</small></h3><ol id="killBoard"></ol></div>
 </div>
 <div id="feed"></div>
 <div id="conn">reconectando ao servidor...</div>
+<div id="mute" title="M para alternar">🔊</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-/* Cliente "burro": envia intenções, desenha o que o servidor manda. */
 const CLASSES = {
-  knight:{hp:300, dmg:8, range:56,  color:'#aeb6c2'},
-  wizard:{hp:100, dmg:2, range:640, color:'#7c5cc4'}
+  knight:{color:'#aeb6c2'},
+  wizard:{color:'#7c5cc4'}
 };
 const XP_LVL = l => 10*(Math.pow(2,l-1)-1);
+const DMG_BASE = {knight:8, wizard:2};
 const dmgAt = (b,l)=> b*Math.pow(2,l-1);
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
@@ -137,12 +144,41 @@ function resize(){ VW=cv.width=innerWidth; VH=cv.height=innerHeight; }
 addEventListener('resize',resize); resize();
 
 const socket = io();
-let myId = null, world = null, state = null;
-const renderPos = new Map();           // id -> {x,y} interpolado
+let myId=null, world=null, state=null, joined=false;
+const renderPos = new Map();
 const tufts = [];
 const floaters = [];
 const cam = {x:0,y:0};
-let joined = false;
+
+/* ---------- som (sintetizado, sem arquivos) ---------- */
+let AC=null, muted=false;
+const SND = {
+  swing:{w:'square',  f1:220,f2:140, d:.07,v:.10},
+  cast: {w:'sine',    f1:380,f2:720, d:.12,v:.12},
+  hit:  {w:'square',  f1:120,f2:80,  d:.09,v:.14},
+  xp:   {w:'triangle',f1:600,f2:920, d:.18,v:.15},
+  lvl:  {w:'triangle',f1:520,f2:1040,d:.35,v:.18},
+  death:{w:'sawtooth',f1:300,f2:60,  d:.50,v:.20},
+  slam: {w:'sine',    f1:90, f2:40,  d:.40,v:.30},
+  roar: {w:'sawtooth',f1:140,f2:70,  d:.60,v:.22},
+  dash: {w:'sine',    f1:500,f2:300, d:.08,v:.10}
+};
+function beep(type){
+  if (muted) return;
+  const P = SND[type]; if (!P) return;
+  try{
+    if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
+    if (AC.state==='suspended') AC.resume();
+    const t0=AC.currentTime, o=AC.createOscillator(), g=AC.createGain();
+    o.connect(g); g.connect(AC.destination);
+    o.type=P.w; o.frequency.setValueAtTime(P.f1,t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(30,P.f2), t0+P.d);
+    g.gain.setValueAtTime(P.v,t0); g.gain.exponentialRampToValueAtTime(.001, t0+P.d);
+    o.start(t0); o.stop(t0+P.d+.02);
+  }catch(e){}
+}
+function toggleMute(){ muted=!muted; document.getElementById('mute').textContent = muted?'🔇':'🔊'; }
+document.getElementById('mute').addEventListener('click', toggleMute);
 
 socket.on('connect', ()=>{ document.getElementById('conn').style.display='none'; });
 socket.on('disconnect', ()=>{ if(joined) document.getElementById('conn').style.display='block'; });
@@ -150,24 +186,26 @@ socket.on('disconnect', ()=>{ if(joined) document.getElementById('conn').style.d
 socket.on('init', d => {
   myId = d.id; world = d.world;
   tufts.length = 0;
-  for (let i=0;i<260;i++) tufts.push({x:Math.random()*world.W, y:Math.random()*world.H, s:3+Math.random()*4});
+  for (let i=0;i<560;i++) tufts.push({x:Math.random()*world.W, y:Math.random()*world.H, s:3+Math.random()*4});
   document.getElementById('start').style.display='none';
-  document.getElementById('hud').style.display='block';
-  document.getElementById('boards').style.display='block';
-  document.getElementById('feed').style.display='block';
+  ['hud','boards','feed'].forEach(id=>document.getElementById(id).style.display='block');
+  document.getElementById('mute').style.display='block';
   joined = true;
   requestAnimationFrame(loop);
 });
 
 socket.on('state', s => {
   state = s;
-  for (const f of s.fx) floaters.push({...f, t:performance.now()});
+  for (const f of s.fx){
+    if (f.txt) floaters.push({...f, t:performance.now()});
+    if (f.snd && Math.abs(f.x-(cam.x+VW/2))<VW/2+320 && Math.abs(f.y-(cam.y+VH/2))<VH/2+320) beep(f.snd);
+  }
 });
 
 socket.on('killed', d => {
   const el = document.getElementById('death');
   document.getElementById('deathInfo').textContent =
-    'Abatido por '+d.by+'. Todo o seu XP foi para o vencedor.';
+    'Abatido por '+d.by+'. Seu XP foi para o vencedor e seus abates zeraram.';
   el.style.display='flex';
   const timerEl = document.getElementById('deathTimer');
   const iv = setInterval(()=>{
@@ -199,13 +237,20 @@ function sendDir(){
   if (x||y){ const n=Math.hypot(x,y); x/=n; y/=n; }
   if (x!==lastDir.x || y!==lastDir.y){ lastDir={x,y}; socket.emit('move',{x,y}); }
 }
-addEventListener('keydown', e=>{ keys[e.key.toLowerCase()]=true; sendDir(); });
-addEventListener('keyup',   e=>{ keys[e.key.toLowerCase()]=false; sendDir(); });
+addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if (k===' '){ e.preventDefault(); if(joined){ socket.emit('dash'); } return; }
+  if (k==='m'){ toggleMute(); return; }
+  keys[k]=true; sendDir();
+});
+addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; sendDir(); });
 let mouse={x:0,y:0};
 cv.addEventListener('mousemove', e=>{ mouse.x=e.clientX; mouse.y=e.clientY; });
 cv.addEventListener('mousedown', e=>{
   if (!joined) return;
   socket.emit('attack', {x:cam.x+e.clientX, y:cam.y+e.clientY});
+  const m = me();
+  if (m && m.alive) beep(m.cls==='knight'?'swing':'cast');
 });
 addEventListener('contextmenu', e=>e.preventDefault());
 
@@ -218,7 +263,6 @@ function lerpEnt(id, tx, ty, dt){
   return r;
 }
 
-/* ---------- loop de desenho ---------- */
 let lastT = performance.now(), lastBoard = 0;
 function loop(){
   const t = performance.now(), dt = Math.min(0.05,(t-lastT)/1000); lastT = t;
@@ -226,7 +270,6 @@ function loop(){
   if (t-lastBoard>500 && state){ lastBoard=t; updateBoards(); updateHud(); }
   requestAnimationFrame(loop);
 }
-
 function me(){ return state ? state.players.find(p=>p.id===myId) : null; }
 
 function draw(t, dt){
@@ -245,14 +288,25 @@ function draw(t, dt){
   }
   ctx.strokeStyle='#2a1d10'; ctx.lineWidth=14; ctx.strokeRect(7,7,world.W-14,world.H-14);
 
+  // telegraphs de pancada do boss (embaixo de tudo)
+  for (const mo of state.monsters){
+    if (!mo.cast) continue;
+    const prog = Math.min(1, (Date.now()-mo.cast.start)/(mo.cast.until-mo.cast.start));
+    ctx.fillStyle='rgba(220,80,40,'+(0.12+0.22*prog)+')';
+    ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r, 0, 7); ctx.fill();
+    ctx.strokeStyle='rgba(255,120,60,.85)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r*prog, 0, 7); ctx.stroke();
+  }
+
   // monstros
   for (const mo of state.monsters){
     const r = lerpEnt(mo.id, mo.x, mo.y, dt);
     if (mo.tier==='boss'){
-      ctx.strokeStyle='rgba(220,80,80,.45)'; ctx.lineWidth=3;
-      ctx.beginPath(); ctx.arc(r.x,r.y,mo.r+9+Math.sin(t/160)*3,0,7); ctx.stroke();
+      ctx.strokeStyle = mo.enraged ? 'rgba(255,60,40,.7)' : 'rgba(220,80,80,.45)';
+      ctx.lineWidth = mo.enraged ? 4 : 3;
+      ctx.beginPath(); ctx.arc(r.x,r.y,mo.r+9+Math.sin(t/(mo.enraged?90:160))*3,0,7); ctx.stroke();
     }
-    ctx.fillStyle = mo.tier==='boss'?'#8c2b3e':mo.tier==='elite'?'#b06a32':'#6da93c';
+    ctx.fillStyle = mo.tier==='boss'?(mo.enraged?'#a8172b':'#8c2b3e'):mo.tier==='elite'?'#b06a32':'#6da93c';
     ctx.beginPath(); ctx.arc(r.x,r.y,mo.r,0,7); ctx.fill();
     ctx.strokeStyle='#22301a'; ctx.lineWidth=2.5; ctx.stroke();
     ctx.fillStyle = mo.tier==='boss'?'#ffd14e':'#1c1c1c';
@@ -260,11 +314,12 @@ function draw(t, dt){
     ctx.beginPath(); ctx.arc(r.x-mo.r*0.32,r.y-3,er,0,7); ctx.arc(r.x+mo.r*0.32,r.y-3,er,0,7); ctx.fill();
     const bw = mo.tier==='normal'?34:mo.tier==='elite'?50:76;
     drawBar(r.x, r.y-mo.r-12, mo.hp/mo.hpMax, bw);
-    const tag = mo.tier==='boss'?'👑 ':mo.tier==='elite'?'◆ ':'';
+    const tag = mo.tier==='boss'?(mo.enraged?'👑🔥 ':'👑 '):mo.tier==='elite'?'◆ ':'';
     label(r.x, r.y-mo.r-18, tag+mo.name+' nv'+mo.level, mo.tier==='boss'?'#ffb4b4':'#d8e8c8', mo.tier==='boss'?12:10);
   }
 
   // jogadores
+  const topLvl = state.players.reduce((mx,p)=>Math.max(mx,p.alive?p.level:0),0);
   for (const p of state.players){
     if (!p.alive) continue;
     const r = lerpEnt(p.id, p.x, p.y, dt);
@@ -298,19 +353,28 @@ function draw(t, dt){
       ctx.beginPath(); ctx.arc(r.x+Math.cos(ang)*30, r.y+Math.sin(ang)*30, 4.5, 0, 7); ctx.fill();
     }
     drawBar(r.x, r.y-30, p.hp/p.hpMax, 44);
-    label(r.x, r.y-37, (p.id===myId?'★ ':'')+p.name+' · nv'+p.level, p.id===myId?'#ffe27a':'#f4ead0', 11);
+    const crown = (p.level===topLvl && topLvl>1) ? '👑 ' : '';
+    label(r.x, r.y-37, crown+(p.id===myId?'★ ':'')+p.name+' · nv'+p.level, p.id===myId?'#ffe27a':'#f4ead0', 11);
   }
 
-  // projéteis
+  // projéteis (os do boss são maiores e de fogo)
   for (const pr of state.projectiles){
-    ctx.fillStyle='rgba(190,160,255,.35)';
-    ctx.beginPath(); ctx.arc(pr.x,pr.y,11,0,7); ctx.fill();
-    ctx.fillStyle='#d9c8ff';
-    ctx.beginPath(); ctx.arc(pr.x,pr.y,5.5,0,7); ctx.fill();
+    if (pr.boss){
+      ctx.fillStyle='rgba(255,120,40,.4)';
+      ctx.beginPath(); ctx.arc(pr.x,pr.y,16,0,7); ctx.fill();
+      ctx.fillStyle='#ffb35e';
+      ctx.beginPath(); ctx.arc(pr.x,pr.y,8,0,7); ctx.fill();
+    } else {
+      ctx.fillStyle='rgba(190,160,255,.35)';
+      ctx.beginPath(); ctx.arc(pr.x,pr.y,11,0,7); ctx.fill();
+      ctx.fillStyle='#d9c8ff';
+      ctx.beginPath(); ctx.arc(pr.x,pr.y,5.5,0,7); ctx.fill();
+    }
   }
 
   // decoração
   for (const d of world.decor){
+    if (d.x<cam.x-60||d.x>cam.x+VW+60||d.y<cam.y-60||d.y>cam.y+VH+60) continue;
     if (d.t==='tree'){
       ctx.fillStyle='#54401f'; ctx.fillRect(d.x-5,d.y-4,10,14);
       ctx.fillStyle='#2f6332'; ctx.beginPath(); ctx.arc(d.x,d.y-16,26,0,7); ctx.fill();
@@ -354,18 +418,20 @@ function updateHud(){
   const cur=XP_LVL(m.level), next=XP_LVL(m.level+1);
   document.getElementById('xpfill').style.width=(100*(m.xp-cur)/(next-cur))+'%';
   document.getElementById('xptxt').textContent=m.xp+' / '+next+' XP';
-  document.getElementById('dmgline').textContent=
-    'Dano: '+dmgAt(CLASSES[m.cls].dmg,m.level)+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
+  let line = 'Dano: '+dmgAt(DMG_BASE[m.cls],m.level)+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
+  if (m.cls==='knight') line += ' · Investida: '+(m.dash>0 ? (m.dash/1000).toFixed(1)+'s' : 'pronta');
+  document.getElementById('dmgline').textContent = line;
 }
 function boardHtml(list, fn){
   return list.slice(0,7).map(p=>
-    '<li class="'+(p.id===myId?'me':'')+'"><span>'+p.name+(p.bot?' 🤖':'')+'</span><span>'+fn(p)+'</span></li>').join('');
+    '<li class="'+(p.id===myId?'me':'')+'"><span>'+p.name+'</span><span>'+fn(p)+'</span></li>').join('');
 }
 function updateBoards(){
+  document.getElementById('online').textContent = '🟢 '+state.online+' online';
   const byLvl=[...state.players].sort((a,b)=>b.level-a.level||b.xp-a.xp);
-  const byKill=[...state.players].sort((a,b)=>b.kills-a.kills||b.level-a.level);
+  const byKill=[...state.players].filter(p=>p.alive).sort((a,b)=>b.kills-a.kills||b.level-a.level);
   document.getElementById('lvlBoard').innerHTML=boardHtml(byLvl,p=>'nv '+p.level);
-  document.getElementById('killBoard').innerHTML=boardHtml(byKill,p=>p.kills+' ⚔');
+  document.getElementById('killBoard').innerHTML=boardHtml(byKill,p=>p.kills+' ⚔')||'<li><span>—</span></li>';
 }
 
 /* ---------- início ---------- */
