@@ -77,10 +77,13 @@ function speedAt(p) {
   return base * (1 - nerf);
 }
 
+/* hits = golpes para matar usando o DANO MÉDIO das classes (não só o knight).
+   Antes era calibrado pelo knight (base 8), o que deixava o wizard penando ~27
+   golpes num mob básico. Agora normal morre em ~4 golpes médios, ágil. */
 const TIER = {
-  normal: { hits: 10, r: 14, speed: 95, aggro: 260, names: ['Goblin', 'Lobo', 'Esqueleto'] },
-  elite:  { hits: 26, r: 20, speed: 85, aggro: 330, names: ['Ogro', 'Troll', 'Espectro'] },
-  boss:   { hits: 60, r: 28, speed: 72, aggro: 1e9, names: ['Dragão', 'Lich', 'Behemoth'] }
+  normal: { hits: 4,  r: 14, speed: 95, aggro: 260, names: ['Goblin', 'Lobo', 'Esqueleto'] },
+  elite:  { hits: 11, r: 20, speed: 85, aggro: 330, names: ['Ogro', 'Troll', 'Espectro'] },
+  boss:   { hits: 34, r: 28, speed: 72, aggro: 1e9, names: ['Dragão', 'Lich', 'Behemoth'] }
 };
 
 /* ---------------- estado ---------------- */
@@ -114,7 +117,8 @@ function makePlayer(name, cls, socketId) {
     hpMax: hpMaxFor(cls, 1), hp: hpMaxFor(cls, 1),
     xp: 0, level: 1, kills: 0, deaths: 0,
     alive: true, invulnUntil: now() + 2500,
-    lastAtk: 0, lastDash: 0, lastRegen: now(), respawnAt: 0, swing: 0
+    lastAtk: 0, lastDash: 0, lastRegen: now(), respawnAt: 0, swing: 0,
+    holding: false, aimX: s.x, aimY: s.y
   };
   players.set(p.id, p);
   return p;
@@ -143,11 +147,13 @@ function spawnMonster() {
   const l = tier === 'normal' ? Math.max(1, med - (Math.random() < 0.5 ? 1 : 0))
           : tier === 'elite' ? med + 1
           : arenaMaxLevel() + 2;                       // boss escala pelo MAIOR nível
-  const T = TIER[tier], hp = T.hits * dmgAt(8, l), s = freeSpot();
+  // dano médio de referência das classes (knight + wizard) / 2, no nível do mob
+  const refDmg = (CLASSES.knight.dmg + CLASSES.wizard.dmg) / 2 * growthPow(l);
+  const T = TIER[tier], hp = Math.round(T.hits * refDmg), s = freeSpot();
   const m = {
     id: 'm' + (nextId++), name: T.names[Math.floor(Math.random() * 3)], tier, level: l,
     x: s.x, y: s.y, r: T.r, hpMax: hp, hp,
-    dmg: 0.5 * dmgAt(8, l), worth: monsterWorth(l),
+    dmg: Math.round(0.5 * refDmg), worth: monsterWorth(l),
     lastAtk: 0, botNext: 0, targetId: null, wanderX: s.x, wanderY: s.y,
     // boss:
     nextSlam: now() + 4000, nextBolt: 0, cast: null, enraged: false
@@ -190,11 +196,12 @@ function kill(victim, attacker) {
       addFx(attacker.x, attacker.y - 40, '+' + Math.round(gain) + ' XP', '#9cff7a', true, 'xp');
       const nl = levelFromXp(attacker.xp);
       if (nl > attacker.level) {
-        const oldMax = attacker.hpMax;
         attacker.level = nl;
         attacker.hpMax = hpMaxFor(attacker.cls, nl);
-        attacker.hp = Math.min(attacker.hpMax, attacker.hp + (attacker.hpMax - oldMax)); // knight ganha o HP novo cheio
+        attacker.hp = attacker.hpMax;        // sobe de nível => vida cheia
+        attacker.lastRegen = now();          // reinicia o ciclo de regen
         addFx(attacker.x, attacker.y - 64, 'NÍVEL ' + nl + '!', '#ffe27a', true, 'lvl');
+        addFx(attacker.x, attacker.y - 84, 'vida restaurada', '#7affb0', false);
         io.emit('log', `⬆ ${attacker.name} alcançou o nível ${nl}!`);
       }
     } else if (gain > 0) {
@@ -205,7 +212,6 @@ function kill(victim, attacker) {
     victim.alive = false; victim.hp = 0; victim.deaths++;
     victim.kills = 0;                      // ranking de abates só vale em vida
     victim.respawnAt = now() + 3000;
-    addFx(victim.x, victim.y, '', '', false, 'death');
     const killerName = attacker ? attacker.name : 'a arena';
     io.emit('log', `💀 ${victim.name} (nv${victim.level}) caiu para ${killerName}`);
     if (victim.socketId) io.to(victim.socketId).emit('killed', { by: killerName, respawnAt: victim.respawnAt });
@@ -226,14 +232,18 @@ function attack(p, tx, ty) {
   if (p.cls === 'knight') {
     p.swing = t;
     const dmg = dmgAt(c.dmg, p.level);
-    forEachNear(entityGrid, p.x, p.y, o => {
+    // alcance curto (56px): varre direto jogadores+monstros próximos, sem depender
+    // da grade (que pode estar defasada quando o clique chega entre ticks)
+    const scan = o => {
       if (o === p || o.alive === false) return;
       const d = Math.hypot(o.x - p.x, o.y - p.y);
       if (d > c.range) return;
       let da = Math.atan2(o.y - p.y, o.x - p.x) - ang;
       da = Math.atan2(Math.sin(da), Math.cos(da));
       if (Math.abs(da) < 1.1) applyDamage(o, dmg, p);
-    });
+    };
+    for (const o of players.values()) scan(o);
+    for (const m of monsters.values()) scan(m);
   } else {
     projectiles.push({
       x: p.x, y: p.y, vx: Math.cos(ang) * c.projSpeed, vy: Math.sin(ang) * c.projSpeed,
@@ -296,6 +306,10 @@ function forEachNear(grid, x, y, fn) {
 
 /* ---------------- física ---------------- */
 function moveEntity(e, dx, dy) {
+  if (!Number.isFinite(dx)) dx = 0;        // delta inválido nunca corrompe a posição
+  if (!Number.isFinite(dy)) dy = 0;
+  if (!Number.isFinite(e.x)) e.x = W / 2;  // auto-cura caso já tenha corrompido
+  if (!Number.isFinite(e.y)) e.y = H / 2;
   e.x = Math.max(30, Math.min(W - 30, e.x + dx));
   e.y = Math.max(30, Math.min(H - 30, e.y + dy));
   forEachNear(decorGrid, e.x, e.y, d => {
@@ -403,6 +417,7 @@ setInterval(() => {
       p.hp = Math.min(p.hpMax, p.hp + p.hpMax * CLASSES[p.cls].regen);
     }
     if (p.dirX || p.dirY) moveEntity(p, p.dirX * speedAt(p) * dt, p.dirY * speedAt(p) * dt);
+    if (p.holding) attack(p, p.aimX, p.aimY);   // auto-attack: cadência limitada dentro de attack()
   }
 
   for (const m of monsters.values()) monsterTick(m, dt, t);
@@ -474,7 +489,14 @@ io.on('connection', socket => {
     me.dirX = x; me.dirY = y;
     if (x || y) me.ang = Math.atan2(y, x);
   });
-  socket.on('attack', d => { if (me && d) attack(me, +d.x, +d.y); });
+  socket.on('attack', d => {
+    if (!me || !d) return;
+    me.aimX = +d.x; me.aimY = +d.y;
+    if (d.hold) me.holding = true;
+    attack(me, +d.x, +d.y);
+  });
+  socket.on('aim', d => { if (me && d) { me.aimX = +d.x; me.aimY = +d.y; } });
+  socket.on('release', () => { if (me) me.holding = false; });
   socket.on('dash', () => { if (me) dash(me); });
   socket.on('disconnect', () => {
     if (!me) return;

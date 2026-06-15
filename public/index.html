@@ -68,9 +68,7 @@
   #death p{margin:12px 0;font-size:15px}
   #conn{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:6;display:none;
     background:#8c2b1e;color:#fff;font-family:monospace;font-size:12px;padding:6px 14px;border:2px solid #000}
-  #mute{position:fixed;right:14px;bottom:14px;z-index:6;display:none;cursor:pointer;
-    background:rgba(20,14,4,.78);border:2px solid var(--gold);color:var(--parchment);
-    font-size:16px;padding:6px 10px;font-family:monospace}
+  #mute{display:none}
 </style>
 </head>
 <body>
@@ -94,7 +92,7 @@
     </div>
     <button class="go" id="playBtn">Entrar na arena</button>
     <div class="rules">
-      <p><b>WASD</b> move · <b>clique</b> ataca · <b>Espaço</b> investida (Knight) · <b>M</b> som.</p>
+      <p><b>WASD</b> move · <b>segure o clique</b> para atacar sem parar · <b>Espaço</b> investida (Knight).</p>
       <p>Cadência máxima: Knight 1 golpe/0,3s, Wizard 1 disparo/0,48s — clicar mais rápido não passa do teto.</p>
       <p>Subir de nível aumenta dano e vida em <b>+22%</b> (vantagem real, mas batível). Do nv6 em diante a <b>velocidade cai</b> um pouco por nível, e quem foge muito da média da arena <b>toma dano extra</b>.</p>
       <p><b>Last hit</b> rouba TODO o XP da vítima (mín. 5). Matar quem está <b>acima</b> sempre vale; só não vale farmar quem está 4+ níveis abaixo.</p>
@@ -126,7 +124,6 @@
 </div>
 <div id="feed"></div>
 <div id="conn">reconectando ao servidor...</div>
-<div id="mute" title="M para alternar">🔊</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -144,39 +141,11 @@ addEventListener('resize',resize); resize();
 const socket = io();
 let myId=null, world=null, state=null, joined=false;
 const renderPos = new Map();
+const swingAnim = new Map();   // id -> {serverSwing, localStart} p/ animar o golpe no relógio local
 const tufts = [];
 const floaters = [];
 const cam = {x:0,y:0};
 
-/* ---------- som (sintetizado, sem arquivos) ---------- */
-let AC=null, muted=false;
-const SND = {
-  swing:{w:'square',  f1:220,f2:140, d:.07,v:.10},
-  cast: {w:'sine',    f1:380,f2:720, d:.12,v:.12},
-  hit:  {w:'square',  f1:120,f2:80,  d:.09,v:.14},
-  xp:   {w:'triangle',f1:600,f2:920, d:.18,v:.15},
-  lvl:  {w:'triangle',f1:520,f2:1040,d:.35,v:.18},
-  death:{w:'sawtooth',f1:300,f2:60,  d:.50,v:.20},
-  slam: {w:'sine',    f1:90, f2:40,  d:.40,v:.30},
-  roar: {w:'sawtooth',f1:140,f2:70,  d:.60,v:.22},
-  dash: {w:'sine',    f1:500,f2:300, d:.08,v:.10}
-};
-function beep(type){
-  if (muted) return;
-  const P = SND[type]; if (!P) return;
-  try{
-    if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
-    if (AC.state==='suspended') AC.resume();
-    const t0=AC.currentTime, o=AC.createOscillator(), g=AC.createGain();
-    o.connect(g); g.connect(AC.destination);
-    o.type=P.w; o.frequency.setValueAtTime(P.f1,t0);
-    o.frequency.exponentialRampToValueAtTime(Math.max(30,P.f2), t0+P.d);
-    g.gain.setValueAtTime(P.v,t0); g.gain.exponentialRampToValueAtTime(.001, t0+P.d);
-    o.start(t0); o.stop(t0+P.d+.02);
-  }catch(e){}
-}
-function toggleMute(){ muted=!muted; document.getElementById('mute').textContent = muted?'🔇':'🔊'; }
-document.getElementById('mute').addEventListener('click', toggleMute);
 
 socket.on('connect', ()=>{ document.getElementById('conn').style.display='none'; });
 socket.on('disconnect', ()=>{ if(joined) document.getElementById('conn').style.display='block'; });
@@ -187,7 +156,6 @@ socket.on('init', d => {
   for (let i=0;i<560;i++) tufts.push({x:Math.random()*world.W, y:Math.random()*world.H, s:3+Math.random()*4});
   document.getElementById('start').style.display='none';
   ['hud','boards','feed'].forEach(id=>document.getElementById(id).style.display='block');
-  document.getElementById('mute').style.display='block';
   joined = true;
   requestAnimationFrame(loop);
 });
@@ -196,8 +164,13 @@ socket.on('state', s => {
   state = s;
   for (const f of s.fx){
     if (f.txt) floaters.push({...f, t:performance.now()});
-    if (f.snd && Math.abs(f.x-(cam.x+VW/2))<VW/2+320 && Math.abs(f.y-(cam.y+VH/2))<VH/2+320) beep(f.snd);
   }
+  // limpa estados de animação de quem saiu (jogadores e monstros)
+  const live = new Set();
+  for (const p of s.players) live.add(p.id);
+  for (const m of s.monsters) live.add(m.id);
+  for (const id of renderPos.keys()) if (!live.has(id)) renderPos.delete(id);
+  for (const id of swingAnim.keys()) if (!live.has(id)) swingAnim.delete(id);
 });
 
 socket.on('killed', d => {
@@ -238,24 +211,39 @@ function sendDir(){
 addEventListener('keydown', e=>{
   const k = e.key.toLowerCase();
   if (k===' '){ e.preventDefault(); if(joined){ socket.emit('dash'); } return; }
-  if (k==='m'){ toggleMute(); return; }
+  if (k==='m'){ return; }
   keys[k]=true; sendDir();
 });
 addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; sendDir(); });
-let mouse={x:0,y:0};
-cv.addEventListener('mousemove', e=>{ mouse.x=e.clientX; mouse.y=e.clientY; });
-cv.addEventListener('mousedown', e=>{
-  if (!joined) return;
-  socket.emit('attack', {x:cam.x+e.clientX, y:cam.y+e.clientY});
-  const m = me();
-  if (m && m.alive) beep(m.cls==='knight'?'swing':'cast');
+let mouse={x:0,y:0}, holding=false;
+cv.addEventListener('mousemove', e=>{
+  mouse.x=e.clientX; mouse.y=e.clientY;
+  if (holding && joined) socket.emit('aim', {x:cam.x+mouse.x, y:cam.y+mouse.y});
 });
+function pressAttack(){
+  if (!joined) return;
+  holding = true;
+  // dispara o primeiro golpe na hora e liga o auto-attack no servidor
+  socket.emit('attack', {x:cam.x+mouse.x, y:cam.y+mouse.y, hold:true});
+}
+function releaseAttack(){
+  holding = false;
+  if (joined) socket.emit('release');
+}
+cv.addEventListener('mousedown', e=>{ if(e.button===0) pressAttack(); });
+addEventListener('mouseup', e=>{ if(e.button===0) releaseAttack(); });
+cv.addEventListener('mouseleave', releaseAttack);
+addEventListener('blur', releaseAttack);
 addEventListener('contextmenu', e=>e.preventDefault());
 
 /* ---------- interpolação ---------- */
 function lerpEnt(id, tx, ty, dt){
+  if (!Number.isFinite(tx) || !Number.isFinite(ty)) {       // snapshot ruim: ignora
+    const old = renderPos.get(id);
+    return old || {x:0, y:0};
+  }
   let r = renderPos.get(id);
-  if (!r){ r={x:tx,y:ty}; renderPos.set(id,r); }
+  if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.y)){ r={x:tx,y:ty}; renderPos.set(id,r); } // auto-cura NaN
   const k = Math.min(1, dt*14);
   r.x += (tx-r.x)*k; r.y += (ty-r.y)*k;
   return r;
@@ -264,7 +252,10 @@ function lerpEnt(id, tx, ty, dt){
 let lastT = performance.now(), lastBoard = 0;
 function loop(){
   const t = performance.now(), dt = Math.min(0.05,(t-lastT)/1000); lastT = t;
-  if (state && world) draw(t, dt);
+  if (state && world){
+    try { draw(t, dt); }
+    catch(err){ console.error('draw falhou neste frame:', err); }  // nunca mata o loop
+  }
   if (t-lastBoard>500 && state){ lastBoard=t; updateBoards(); updateHud(); }
   requestAnimationFrame(loop);
 }
@@ -274,8 +265,11 @@ function draw(t, dt){
   const m = me();
   if (m){
     const r = lerpEnt(m.id, m.x, m.y, dt);
-    cam.x = Math.max(0, Math.min(world.W-VW, r.x-VW/2));
-    cam.y = Math.max(0, Math.min(world.H-VH, r.y-VH/2));
+    const maxX = Math.max(0, world.W-VW), maxY = Math.max(0, world.H-VH);
+    const nx = Math.max(0, Math.min(maxX, r.x-VW/2));
+    const ny = Math.max(0, Math.min(maxY, r.y-VH/2));
+    if (Number.isFinite(nx)) cam.x = nx;     // só atualiza se for número válido
+    if (Number.isFinite(ny)) cam.y = ny;
   }
   ctx.fillStyle = '#4d8a4f'; ctx.fillRect(0,0,VW,VH);
   ctx.save(); ctx.translate(-cam.x,-cam.y);
@@ -338,8 +332,14 @@ function draw(t, dt){
     ctx.lineWidth=3; ctx.strokeStyle = p.id===myId?'#ffd968':'#26190c'; ctx.stroke();
     if (p.cls==='knight'){
       ctx.fillStyle='#7d8694'; ctx.fillRect(r.x-10,r.y-7,20,5);
-      const sw = Math.max(0, 1-(Date.now()-p.swing)/180);
-      const sa = ang + (sw>0 ? (-0.9+1.8*(1-sw)) : 0.35);
+      // detecta um novo golpe: anima só quando o swing MUDA para um valor novo.
+      // Na primeira vez que vemos o knight, registramos o swing atual SEM animar
+      // (senão todo knight "dá um golpe fantasma" ao surgir na tela).
+      let sd = swingAnim.get(p.id);
+      if (!sd){ sd = {serverSwing:p.swing, localStart:-1e9}; swingAnim.set(p.id, sd); }
+      else if (p.swing && p.swing !== sd.serverSwing){ sd.serverSwing = p.swing; sd.localStart = t; }
+      const sw = Math.max(0, 1-(t-sd.localStart)/180);
+      const sa = ang + (sw>0 ? (-0.9+1.8*(1-sw)) : 0.35);   // sw=0 => espada em repouso
       ctx.strokeStyle='#e8e8ee'; ctx.lineWidth=4;
       ctx.beginPath(); ctx.moveTo(r.x+Math.cos(sa)*12, r.y+Math.sin(sa)*12);
       ctx.lineTo(r.x+Math.cos(sa)*40, r.y+Math.sin(sa)*40); ctx.stroke();
