@@ -57,8 +57,9 @@ Qualquer host Node com WebSockets:
 | Knight | 300 HP **×1.35 por nível**, dano 8, alcance 56px, regen 1%/3s, vel. 185, **Investida (Espaço, 2,5s cd)** |
 | Wizard | 100 HP, dano 2, projétil 640px a 560px/s, regen 2%/3s, **vel. 205 (mais ágil)** |
 | Cadência | Knight 1 golpe/300ms · Wizard 1 disparo/480ms (clique importa até o teto) |
-| Dano | dobra por nível: 8 → 16 → 32... |
-| XP por nível | dobra: 10 → 20 → 40... (acumulado 10, 30, 70, 150...) |
+| Dano e HP | crescem **+22% por nível** (`growth`, ajustável no admin) — não dobram mais |
+| XP por nível | custo cresce ~55% por nível (`xpGrowth`) |
+| Golpes p/ matar | ~constante entre níveis próximos (conserta o "monstro intocável") |
 | Last hit | rouba TODO o XP da vítima (mínimo 5, nível 1 incluso) |
 | Regra dos 3 níveis | só bloqueia farmar quem está **4+ níveis abaixo**; matar acima sempre vale |
 | Anti-snowball | nv6+: velocidade −3%/nível (máx −15%) · 2+ níveis acima da mediana: dano recebido +10%/nível (máx +40%) |

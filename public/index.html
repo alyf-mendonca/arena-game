@@ -96,7 +96,7 @@
     <div class="rules">
       <p><b>WASD</b> move · <b>clique</b> ataca · <b>Espaço</b> investida (Knight) · <b>M</b> som.</p>
       <p>Cadência máxima: Knight 1 golpe/0,3s, Wizard 1 disparo/0,48s — clicar mais rápido não passa do teto.</p>
-      <p><b>Dano dobra</b> a cada nível. Do nv6 em diante a <b>velocidade cai</b> um pouco por nível, e quem foge muito da média da arena <b>toma dano extra</b>.</p>
+      <p>Subir de nível aumenta dano e vida em <b>+22%</b> (vantagem real, mas batível). Do nv6 em diante a <b>velocidade cai</b> um pouco por nível, e quem foge muito da média da arena <b>toma dano extra</b>.</p>
       <p><b>Last hit</b> rouba TODO o XP da vítima (mín. 5). Matar quem está <b>acima</b> sempre vale; só não vale farmar quem está 4+ níveis abaixo.</p>
       <p><b>Abates zeram ao morrer</b> — o ranking é da vida atual.</p>
       <p>O <b>Chefe 👑</b> nasce 2 níveis acima do líder, persegue o maior nível da arena e tem Pancada em área, Bola de Fogo e Fúria.</p>
@@ -134,9 +134,7 @@ const CLASSES = {
   knight:{color:'#aeb6c2'},
   wizard:{color:'#7c5cc4'}
 };
-const XP_LVL = l => 10*(Math.pow(2,l-1)-1);
-const DMG_BASE = {knight:8, wizard:2};
-const dmgAt = (b,l)=> b*Math.pow(2,l-1);
+// dano/XP vêm prontos do servidor (sem fórmula duplicada = sem divergência)
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let VW=0,VH=0;
@@ -292,10 +290,16 @@ function draw(t, dt){
   for (const mo of state.monsters){
     if (!mo.cast) continue;
     const prog = Math.min(1, (Date.now()-mo.cast.start)/(mo.cast.until-mo.cast.start));
-    ctx.fillStyle='rgba(220,80,40,'+(0.12+0.22*prog)+')';
+    // zona de perigo
+    ctx.fillStyle='rgba(220,60,30,'+(0.14+0.26*prog)+')';
     ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r, 0, 7); ctx.fill();
-    ctx.strokeStyle='rgba(255,120,60,.85)'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r*prog, 0, 7); ctx.stroke();
+    // borda piscando mais rápido conforme chega o impacto
+    const flash = 0.5+0.5*Math.sin(t/ (60+120*(1-prog)));
+    ctx.strokeStyle='rgba(255,'+(60+120*flash|0)+',40,.9)'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r-2, 0, 7); ctx.stroke();
+    // anel interno que preenche = tempo até o impacto
+    ctx.fillStyle='rgba(255,150,60,.30)';
+    ctx.beginPath(); ctx.arc(mo.cast.x, mo.cast.y, mo.cast.r*prog, 0, 7); ctx.fill();
   }
 
   // monstros
@@ -415,10 +419,10 @@ function updateHud(){
     m.name+' · '+(m.cls==='knight'?'⚔️ Knight':'🔮 Wizard')+' · Nível '+m.level;
   document.getElementById('hpfill').style.width=(100*m.hp/m.hpMax)+'%';
   document.getElementById('hptxt').textContent=m.hp+' / '+m.hpMax+' HP';
-  const cur=XP_LVL(m.level), next=XP_LVL(m.level+1);
-  document.getElementById('xpfill').style.width=(100*(m.xp-cur)/(next-cur))+'%';
+  const cur=m.xpCur, next=m.xpNext;
+  document.getElementById('xpfill').style.width=(100*(m.xp-cur)/Math.max(1,next-cur))+'%';
   document.getElementById('xptxt').textContent=m.xp+' / '+next+' XP';
-  let line = 'Dano: '+dmgAt(DMG_BASE[m.cls],m.level)+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
+  let line = 'Dano: '+m.dmg+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
   if (m.cls==='knight') line += ' · Investida: '+(m.dash>0 ? (m.dash/1000).toFixed(1)+'s' : 'pronta');
   document.getElementById('dmgline').textContent = line;
 }

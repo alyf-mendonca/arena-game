@@ -43,23 +43,33 @@ const DASH_CD = 2500, DASH_DIST = 140;
 
 // Editável pelo painel admin em tempo real:
 const CLASSES = {
-  knight: { hp: 300, dmg: 8, regen: 0.010, speed: 185, range: 56,  atkMs: 300, hpGrow: 1.35, projSpeed: 0 },
-  wizard: { hp: 100, dmg: 2, regen: 0.020, speed: 205, range: 640, atkMs: 480, hpGrow: 1.00, projSpeed: 560 }
+  knight: { hp: 300, dmg: 12, regen: 0.010, speed: 185, range: 56,  atkMs: 300, hpGrow: 1.0, projSpeed: 0 },
+  wizard: { hp: 100, dmg: 3,  regen: 0.020, speed: 205, range: 640, atkMs: 480, hpGrow: 1.0, projSpeed: 560 }
 };
 const BALANCE = {
-  speedNerfStart: 6,      // a partir deste nível a velocidade cai...
-  speedNerfPerLvl: 0.03,  // ...3% por nível...
-  speedNerfMax: 0.15,     // ...até -15%
-  leaderDmgPerLvl: 0.10,  // +10% de dano tomado por nível acima de mediana+1
+  growth: 1.22,           // +22% de dano e HP por nível (substitui o "dobra")
+  xpGrowth: 1.55,         // quanto o custo de XP de cada nível cresce
+  speedNerfStart: 6,
+  speedNerfPerLvl: 0.03,
+  speedNerfMax: 0.15,
+  leaderDmgPerLvl: 0.10,
   leaderDmgMax: 0.40,
-  minBounty: 5            // XP mínimo que qualquer jogador vale
+  minBounty: 5
 };
 
-const XP_LVL = l => 10 * (Math.pow(2, l - 1) - 1);
+/* CURVA DE CRESCIMENTO (v3)
+   Antes dano/HP dobravam (2^(l-1)) — instável, quebrava o jogo no late game.
+   Agora crescem suave: GROWTH^(l-1). GROWTH=1.22 => +22% por nível.
+   Editável ao vivo pelo painel admin (BALANCE.growth).
+   HP segue a MESMA curva => nº de golpes p/ matar fica estável entre níveis,
+   o que conserta o "monstro intocável" na raiz. */
+const growthPow = l => Math.pow(BALANCE.growth, l - 1);
+// XP p/ subir cresce um pouco mais rápido que o poder, pra cada nível custar:
+const XP_LVL = l => Math.round(20 * (Math.pow(BALANCE.xpGrowth, l - 1) - 1) / (BALANCE.xpGrowth - 1));
 const levelFromXp = xp => { let l = 1; while (xp >= XP_LVL(l + 1)) l++; return l; };
-const dmgAt = (b, l) => b * Math.pow(2, l - 1);
-const monsterWorth = l => Math.max(5, 0.5 * XP_LVL(l + 1));
-const hpMaxFor = (cls, l) => Math.round(CLASSES[cls].hp * Math.pow(CLASSES[cls].hpGrow, l - 1));
+const dmgAt = (b, l) => b * growthPow(l);
+const monsterWorth = l => Math.max(BALANCE.minBounty, Math.round(0.5 * (XP_LVL(l + 1) - XP_LVL(l))));
+const hpMaxFor = (cls, l) => Math.round(CLASSES[cls].hp * Math.pow(CLASSES[cls].hpGrow * BALANCE.growth, l - 1));
 function speedAt(p) {
   const base = CLASSES[p.cls].speed;
   if (p.level < BALANCE.speedNerfStart) return base;
@@ -216,13 +226,14 @@ function attack(p, tx, ty) {
   if (p.cls === 'knight') {
     p.swing = t;
     const dmg = dmgAt(c.dmg, p.level);
-    for (const o of targetsExcept(p)) {
+    forEachNear(entityGrid, p.x, p.y, o => {
+      if (o === p || o.alive === false) return;
       const d = Math.hypot(o.x - p.x, o.y - p.y);
-      if (d > c.range) continue;
+      if (d > c.range) return;
       let da = Math.atan2(o.y - p.y, o.x - p.x) - ang;
       da = Math.atan2(Math.sin(da), Math.cos(da));
       if (Math.abs(da) < 1.1) applyDamage(o, dmg, p);
-    }
+    });
   } else {
     projectiles.push({
       x: p.x, y: p.y, vx: Math.cos(ang) * c.projSpeed, vy: Math.sin(ang) * c.projSpeed,
@@ -241,24 +252,59 @@ function dash(p) {
   for (let i = 0; i < 7; i++) moveEntity(p, dx / n * DASH_DIST / 7, dy / n * DASH_DIST / 7);
   addFx(p.x, p.y - 10, '»', '#cfe2ff', false, 'dash');
 }
-function targetsExcept(p) {
-  const out = [];
-  for (const o of players.values()) if (o !== p && o.alive) out.push(o);
-  for (const m of monsters.values()) out.push(m);
-  return out;
+
+
+/* ---------------- grade espacial (performance) ----------------
+   Em vez de cada movimento/ataque varrer TODAS as entidades (O(n²)),
+   dividimos o mundo em células de CELL px e só olhamos as células vizinhas.
+   - decorGrid: estático, montado uma vez (árvores/pedras)
+   - entityGrid: remontado a cada tick com jogadores vivos + monstros */
+const CELL = 200;
+const GW = Math.ceil(W / CELL);
+const cellIndex = (x, y) => Math.max(0, Math.min(GW - 1, x / CELL | 0)) + Math.max(0, Math.min(GW - 1, y / CELL | 0)) * GW;
+
+const decorGrid = new Map();
+for (const d of decor) {
+  const k = cellIndex(d.x, d.y);
+  if (!decorGrid.has(k)) decorGrid.set(k, []);
+  decorGrid.get(k).push(d);
+}
+let entityGrid = new Map();
+function rebuildEntityGrid() {
+  entityGrid = new Map();
+  const add = e => {
+    const k = cellIndex(e.x, e.y);
+    if (!entityGrid.has(k)) entityGrid.set(k, []);
+    entityGrid.get(k).push(e);
+  };
+  for (const p of players.values()) if (p.alive) add(p);
+  for (const m of monsters.values()) add(m);
+}
+// chama fn para cada entidade nas 9 células ao redor de (x,y)
+function forEachNear(grid, x, y, fn) {
+  const cx = Math.max(0, Math.min(GW - 1, x / CELL | 0));
+  const cy = Math.max(0, Math.min(GW - 1, y / CELL | 0));
+  for (let gy = cy - 1; gy <= cy + 1; gy++) {
+    if (gy < 0 || gy >= GW) continue;
+    for (let gx = cx - 1; gx <= cx + 1; gx++) {
+      if (gx < 0 || gx >= GW) continue;
+      const arr = grid.get(gx + gy * GW);
+      if (arr) for (const e of arr) fn(e);
+    }
+  }
 }
 
 /* ---------------- física ---------------- */
 function moveEntity(e, dx, dy) {
   e.x = Math.max(30, Math.min(W - 30, e.x + dx));
   e.y = Math.max(30, Math.min(H - 30, e.y + dy));
-  for (const d of decor) {
+  forEachNear(decorGrid, e.x, e.y, d => {
     const dist = Math.hypot(e.x - d.x, e.y - d.y), min = d.r + 14;
     if (dist < min && dist > 0.01) {
       e.x = d.x + (e.x - d.x) / dist * min;
       e.y = d.y + (e.y - d.y) / dist * min;
     }
-  }
+  });
 }
 
 /* ---------------- IA dos monstros ---------------- */
@@ -268,11 +314,11 @@ function monsterTick(m, dt, t) {
   if (t >= m.botNext) {
     m.botNext = t + 400;
     let near = null, nd = 1e9;
-    for (const p of players.values()) {
-      if (!p.alive) continue;
+    forEachNear(entityGrid, m.x, m.y, p => {
+      if (p.cls === undefined || !p.alive) return;       // só jogadores
       const d = Math.hypot(p.x - m.x, p.y - m.y);
       if (d < nd && d < T.aggro) { nd = d; near = p; }
-    }
+    });
     m.targetId = near ? near.id : null;
     if (!near && Math.hypot(m.wanderX - m.x, m.wanderY - m.y) < 40) {
       m.wanderX = Math.max(80, Math.min(W - 80, m.x + (Math.random() * 400 - 200)));
@@ -325,16 +371,18 @@ function bossTick(m, dt, t) {
   const tgt = m.targetId ? players.get(m.targetId) : null;
   if (!tgt || !tgt.alive) return;
   const d = Math.hypot(tgt.x - m.x, tgt.y - m.y), a = Math.atan2(tgt.y - m.y, tgt.x - m.x);
-  const sp = TIER.boss.speed * (m.enraged ? 1.45 : 1);
+  const sp = TIER.boss.speed * (m.enraged ? 1.35 : 1);
   if (d > m.r + 16) moveEntity(m, Math.cos(a) * sp * dt, Math.sin(a) * sp * dt);
-  if (d < m.r + 34 && t - m.lastAtk > (m.enraged ? 600 : 900)) { m.lastAtk = t; applyDamage(tgt, m.dmg, m); }
-  if (d < 175 && t >= m.nextSlam) {
-    m.nextSlam = t + (m.enraged ? 4000 : 6500);
-    m.cast = { type: 'slam', x: m.x, y: m.y, r: 150, until: t + 900, start: t };
-  } else if (d >= 175 && t >= m.nextBolt) {
-    m.nextBolt = t + (m.enraged ? 1700 : 2800);
+  if (d < m.r + 34 && t - m.lastAtk > (m.enraged ? 900 : 1300)) { m.lastAtk = t; applyDamage(tgt, m.dmg, m); }
+  if (d < 320 && t >= m.nextSlam) {
+    // telegraph longo, no chão sob o ALVO, com aviso — dá tempo de sair de perto
+    m.nextSlam = t + (m.enraged ? 5000 : 8000);
+    m.cast = { type: 'slam', x: tgt.x, y: tgt.y, r: 160, until: t + 1300, start: t };
+    addFx(tgt.x, tgt.y - 30, 'PANCADA! saia do círculo', '#ff6a5e', true, 'cast');
+  } else if (d >= 320 && t >= m.nextBolt) {
+    m.nextBolt = t + (m.enraged ? 2200 : 3400);
     projectiles.push({
-      x: m.x, y: m.y, vx: Math.cos(a) * 430, vy: Math.sin(a) * 430,
+      x: m.x, y: m.y, vx: Math.cos(a) * 400, vy: Math.sin(a) * 400,
       dmg: m.dmg, ownerId: m.id, traveled: 0, max: 1000, boss: true
     });
     addFx(m.x, m.y - 50, '🔥', '#ff9a5e', false, 'cast');
@@ -359,21 +407,23 @@ setInterval(() => {
 
   for (const m of monsters.values()) monsterTick(m, dt, t);
 
+  // monta a grade depois de todo mundo se mover, para ataques/projéteis usarem posições atuais
+  rebuildEntityGrid();
+
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const pr = projectiles[i];
     pr.x += pr.vx * dt; pr.y += pr.vy * dt;
     pr.traveled += Math.hypot(pr.vx * dt, pr.vy * dt);
     let hit = pr.traveled > pr.max || pr.x < 0 || pr.x > W || pr.y < 0 || pr.y > H;
-    if (!hit) for (const d of decor) { if (Math.hypot(pr.x - d.x, pr.y - d.y) < d.r) { hit = true; break; } }
+    if (!hit) forEachNear(decorGrid, pr.x, pr.y, d => { if (!hit && Math.hypot(pr.x - d.x, pr.y - d.y) < d.r) hit = true; });
     if (!hit) {
       const owner = players.get(pr.ownerId) || monsters.get(pr.ownerId);
-      let pool;
-      if (pr.boss) { pool = []; for (const p of players.values()) if (p.alive) pool.push(p); }
-      else pool = targetsExcept(owner || { id: null }).filter(o => o.id !== pr.ownerId);
       const rad = pr.boss ? 22 : 18;
-      for (const o of pool) {
-        if (Math.hypot(o.x - pr.x, o.y - pr.y) < rad) { applyDamage(o, pr.dmg, owner); hit = true; break; }
-      }
+      forEachNear(entityGrid, pr.x, pr.y, o => {
+        if (hit || o.id === pr.ownerId || o.alive === false) return;
+        if (pr.boss && o.cls === undefined) return;      // bola de fogo do boss só atinge jogadores
+        if (Math.hypot(o.x - pr.x, o.y - pr.y) < rad) { applyDamage(o, pr.dmg, owner); hit = true; }
+      });
     }
     if (hit) projectiles.splice(i, 1);
   }
@@ -387,6 +437,7 @@ setInterval(() => {
       players: [...players.values()].map(p => ({
         id: p.id, name: p.name, cls: p.cls, x: Math.round(p.x), y: Math.round(p.y),
         hp: Math.ceil(p.hp), hpMax: p.hpMax, level: p.level, xp: Math.round(p.xp),
+        xpCur: XP_LVL(p.level), xpNext: XP_LVL(p.level + 1), dmg: Math.round(dmgAt(CLASSES[p.cls].dmg, p.level)),
         kills: p.kills, deaths: p.deaths, alive: p.alive,
         inv: t < p.invulnUntil, ang: +p.ang.toFixed(2), swing: p.swing,
         dash: p.cls === 'knight' ? Math.max(0, p.lastDash + DASH_CD - t) : 0
@@ -411,7 +462,7 @@ io.on('connection', socket => {
     if (me) return;
     const cls = data && data.cls === 'wizard' ? 'wizard' : 'knight';
     me = makePlayer(sanitizeName(data && data.name), cls, socket.id);
-    socket.emit('init', { id: me.id, world: { W, H, decor } });
+    socket.emit('init', { id: me.id, world: { W, H, decor }, cfg: { growth: BALANCE.growth } });
     io.emit('log', `⚑ ${me.name} entrou na arena como ${cls === 'knight' ? 'Knight' : 'Wizard'}`);
     ensureMonsters();
   });
@@ -434,7 +485,7 @@ io.on('connection', socket => {
 
 /* ---------------- painel admin escondido ---------------- */
 const EDITABLE = ['hp', 'dmg', 'regen', 'speed', 'range', 'atkMs', 'hpGrow', 'projSpeed'];
-const EDITABLE_BAL = ['speedNerfStart', 'speedNerfPerLvl', 'speedNerfMax', 'leaderDmgPerLvl', 'leaderDmgMax', 'minBounty'];
+const EDITABLE_BAL = ['growth', 'xpGrowth', 'speedNerfStart', 'speedNerfPerLvl', 'speedNerfMax', 'leaderDmgPerLvl', 'leaderDmgMax', 'minBounty'];
 
 app.get(ADMIN_PATH + '/config', (req, res) => {
   res.json({ classes: CLASSES, balance: BALANCE, online: players.size,
@@ -451,8 +502,10 @@ app.post(ADMIN_PATH + '/config', (req, res) => {
     }
   }
   if (b.balance) for (const k of EDITABLE_BAL) {
-    const v = +b.balance[k];
-    if (Number.isFinite(v) && v >= 0) BALANCE[k] = v;
+    let v = +b.balance[k];
+    if (!Number.isFinite(v) || v < 0) continue;
+    if (k === 'growth' || k === 'xpGrowth') v = Math.max(1.01, v); // precisa ser > 1
+    BALANCE[k] = v;
   }
   // reaplica HP máximo aos vivos sem matar ninguém
   for (const p of players.values()) {
