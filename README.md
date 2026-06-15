@@ -1,74 +1,59 @@
-# Arena de Aço & Magia — v2 (online)
+# Arena de Aço & Magia — v4 (rodadas + habilidade)
 
-Multiplayer 2D de fantasia: Knights e Wizards numa arena todos-contra-todos.
-O **last hit** rouba todo o XP da vítima, o dano dobra a cada nível e o Chefe 👑
-caça o jogador mais forte do servidor.
+Multiplayer 2D de fantasia. Knights e Wizards numa arena todos-contra-todos,
+agora em **rodadas de 10 minutos** onde vence quem tiver **mais abates de PVP**.
+O foco saiu do grind e foi para **habilidade**: ~5 acertos matam entre quaisquer
+níveis, e cada classe tem um **especial no botão direito** (cooldown 10s).
 
-## Estrutura
-
-```
-arena-online/
-├── server.js          → servidor autoritativo (Node + Socket.io, 30 ticks/s)
-├── public/index.html  → cliente (desenha, envia comandos, toca sons)
-├── package.json
-└── README.md
-```
-
-## Rodar localmente
+## Rodar
 
 ```bash
 npm install
 npm start
 ```
 
-Jogo: `http://localhost:3000` (abra 2 abas para testar o multiplayer).
-**Painel admin**: `http://localhost:3000/123921839128398213912389213`
+Jogo: `http://localhost:3000` (abra 2 abas para testar).
+Painel admin: `http://localhost:3000/123921839128398213912389213`
+(troque com a variável de ambiente `ADMIN_PATH`).
 
-## Painel dos Deuses (admin escondido)
+## Controles
 
-Acessível só por quem conhece a URL. Permite ajustar **ao vivo**, sem reiniciar:
+- **WASD** — mover
+- **Segurar clique esquerdo** — atacar sem parar (auto-attack na cadência da classe)
+- **Clique direito** (ou **Espaço**) — usar o especial
+- O especial tem cooldown de ~10s, que diminui conforme você sobe de nível
 
-- Por classe: HP base, dano base, regeneração, velocidade, alcance,
-  cooldown de ataque, multiplicador de HP por nível, velocidade de projétil
-- Global: início/intensidade/teto do nerf de velocidade, dano extra do líder,
-  XP mínimo por kill
-- Mostra jogadores online, nível mediano/máximo da arena e nº de monstros
+## Especiais
 
-⚠️ A segurança é só a URL secreta. Para trocar o caminho sem mexer no código:
-`ADMIN_PATH=/meu-segredo-novo npm start`. Não compartilhe a URL e, se vazar,
-troque o ADMIN_PATH e reinicie.
+- **Knight — Investida Brutal**: avança forte na direção da mira; o primeiro
+  alvo atingido é atordoado, empurrado e leva dano pesado. É o "engage".
+- **Wizard — Nova Arcana**: explosão em área ao redor do mago que empurra e
+  fere todos por perto. É o "disengage" — pune quem colou.
 
-## Colocar online
-
-Qualquer host Node com WebSockets:
-
-- **Render.com (grátis)**: suba para o GitHub → New Web Service → build
-  `npm install`, start `npm start`. Defina a variável `ADMIN_PATH` em
-  Environment para ter sua própria URL secreta. No plano grátis o servidor
-  dorme após ~15 min vazio.
-- **Railway.app**: Deploy from GitHub repo → Generate Domain.
-- **VPS (~US$5/mês)**: `npm install -g pm2 && pm2 start server.js` para ficar
-  sempre no ar (instruções completas na v1 valem igual).
-
-## Regras (v2)
+## Filosofia de balanceamento (v4)
 
 | Regra | Valor |
 |---|---|
-| Knight | 300 HP **×1.35 por nível**, dano 8, alcance 56px, regen 1%/3s, vel. 185, **Investida (Espaço, 2,5s cd)** |
-| Wizard | 100 HP, dano 2, projétil 640px a 560px/s, regen 2%/3s, **vel. 205 (mais ágil)** |
-| Cadência | Knight 1 golpe/300ms · Wizard 1 disparo/480ms (clique importa até o teto) |
-| Dano e HP | crescem **+22% por nível** (`growth`, ajustável no admin) — não dobram mais |
-| XP por nível | custo cresce ~55% por nível (`xpGrowth`) |
-| Golpes p/ matar | ~constante entre níveis próximos (conserta o "monstro intocável") |
-| Last hit | rouba TODO o XP da vítima (mínimo 5, nível 1 incluso) |
-| Regra dos 3 níveis | só bloqueia farmar quem está **4+ níveis abaixo**; matar acima sempre vale |
-| Anti-snowball | nv6+: velocidade −3%/nível (máx −15%) · 2+ níveis acima da mediana: dano recebido +10%/nível (máx +40%) |
-| Abates | zeram ao morrer — ranking vale só na vida atual |
-| Monstros | 2× o nº de jogadores online (mín. 8); dano e XP = metade de um jogador do nível |
-| Tiers | Normal ~10 golpes · Elite ◆ ~26 · Chefe 👑 ~60 (máx. 1) |
-| Chefe | nível = maior jogador +2, persegue o maior nível no mapa todo; Pancada em área (telegraph 0,9s, 1.6× dano), Bola de Fogo à distância, Fúria <30% HP (+45% vel., cooldowns menores) |
-| Morte | respawn 3s, nível 1, 2,5s de escudo |
+| Letalidade | ~5 acertos matam, entre QUAISQUER níveis |
+| Dano por nível | +1,5% (quase nada — habilidade manda) |
+| HP por nível | +5% (vantagem leve de durabilidade) |
+| Velocidade | fixa (agilidade é skill, não level) |
+| Especial | cooldown 10s, −0,4s por nível (mínimo 5s) |
+| Vencedor da rodada | mais abates de PVP (desempate: maior nível) |
+| Rodada | 10 min + 15s de intervalo, depois reset geral |
+| Morte | −1 abate no placar, respawn em 2,5s, mantém nível |
+| Monstros (PVM) | dão XP, NÃO contam no placar; 2× o nº de jogadores |
+| Tiers de monstro | Normal ~4 golpes · Elite ◆ ~9 · Chefe 👑 ~22 |
+| Chefe | nível = maior jogador +2, caça o maior nível; Pancada, Bola de Fogo, Fúria |
 | Mapa | 3600×3600 |
-| Sem bots | arena 100% de jogadores reais + monstros |
 
-Sons sintetizados no navegador (sem arquivos) — tecla **M** silencia.
+Sem som, sem bots — só jogadores reais + monstros. Servidor autoritativo
+(o cliente só desenha e envia intenções), grade espacial para performance,
+e guardas anti-NaN para o mapa nunca "sumir".
+
+## Painel dos Deuses (admin)
+
+Ajusta ao vivo, sem reiniciar: dano, regen, velocidade, alcance, cadência e
+projétil de cada classe; e os globais (HP/nível, dano/nível, custo de XP,
+cooldown do especial, punição por morte). A única proteção é a URL secreta —
+defina `ADMIN_PATH` no deploy e não compartilhe.

@@ -45,6 +45,16 @@
   .bar i{display:block;height:100%;transition:width .15s}
   #hpfill{background:linear-gradient(#d8543c,#8c2b1e)}
   #xpfill{background:linear-gradient(#e8cf76,#b78f2e)}
+  #spfill{background:linear-gradient(#6fb6ff,#3a6fc4)}
+  #roundbar{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:5;display:none;
+    background:rgba(20,14,4,.82);border:2px solid var(--gold);color:var(--parchment);
+    font-family:monospace;font-size:18px;padding:6px 18px;letter-spacing:1px}
+  #roundbar.urgent{border-color:#d8543c;color:#ff9a8a}
+  #roundover{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;
+    background:rgba(10,20,40,.6)}
+  #roundover .scroll-card{max-width:460px}
+  #roundover h1{font-size:28px;color:var(--gold)}
+  #roundover p{margin:12px 0;font-size:16px}
   .bar span{position:absolute;inset:0;text-align:center;font-size:10px;line-height:11px;
     font-family:monospace;color:#fff;text-shadow:0 1px 2px #000}
   #dmgline{font-size:12px;margin-top:6px;font-family:monospace;color:var(--gold)}
@@ -83,21 +93,20 @@
     <div class="classes">
       <div class="class-card sel" data-class="knight">
         <span class="ico">⚔️</span><h2>Knight</h2>
-        <p>300 de vida, <b>cresce a cada nível</b><br>Dano 8 corpo a corpo<br>Investida com <b>Espaço</b><br>Regenera 1% / 3s</p>
+        <p>Mais resistente<br>Espada corpo a corpo<br><b>Especial: Investida Brutal</b><br>avança e atordoa o alvo</p>
       </div>
       <div class="class-card" data-class="wizard">
         <span class="ico">🔮</span><h2>Wizard</h2>
-        <p>100 de vida<br>Dano 2 à distância<br><b>Mais ágil</b> e projétil veloz<br>Regenera 2% / 3s</p>
+        <p>Mais frágil, mais ágil<br>Magia à distância<br><b>Especial: Nova Arcana</b><br>explosão que empurra todos</p>
       </div>
     </div>
     <button class="go" id="playBtn">Entrar na arena</button>
     <div class="rules">
-      <p><b>WASD</b> move · <b>segure o clique</b> para atacar sem parar · <b>Espaço</b> investida (Knight).</p>
-      <p>Cadência máxima: Knight 1 golpe/0,3s, Wizard 1 disparo/0,48s — clicar mais rápido não passa do teto.</p>
-      <p>Subir de nível aumenta dano e vida em <b>+22%</b> (vantagem real, mas batível). Do nv6 em diante a <b>velocidade cai</b> um pouco por nível, e quem foge muito da média da arena <b>toma dano extra</b>.</p>
-      <p><b>Last hit</b> rouba TODO o XP da vítima (mín. 5). Matar quem está <b>acima</b> sempre vale; só não vale farmar quem está 4+ níveis abaixo.</p>
-      <p><b>Abates zeram ao morrer</b> — o ranking é da vida atual.</p>
-      <p>O <b>Chefe 👑</b> nasce 2 níveis acima do líder, persegue o maior nível da arena e tem Pancada em área, Bola de Fogo e Fúria.</p>
+      <p><b>WASD</b> move · <b>segure o clique esquerdo</b> ataca sem parar · <b>clique direito</b> (ou <b>Espaço</b>) usa o especial.</p>
+      <p><b>Rodadas de 10 minutos.</b> Vence quem tiver <b>mais abates de PVP</b>. No fim, vencedor e reset.</p>
+      <p>Combate é de <b>habilidade</b>, não de grind: ~5 acertos matam entre quaisquer níveis. O especial tem cooldown de 10s — usar na hora certa decide a luta.</p>
+      <p>Subir de nível dá só <b>um pouco de vida</b> e deixa o <b>especial mais rápido</b>. Quase não muda o dano.</p>
+      <p><b>Morrer custa 1 abate</b> no placar, mas você volta rápido. Monstros dão XP mas <b>não contam no placar</b>.</p>
     </div>
   </div>
 </div>
@@ -110,17 +119,28 @@
   </div>
 </div>
 
+<div id="roundover">
+  <div class="scroll-card">
+    <h1>Fim da Rodada</h1>
+    <p id="winnerInfo"></p>
+    <p style="font-family:monospace" id="nextRound"></p>
+  </div>
+</div>
+
 <div id="hud">
   <div class="nm" id="hudName"></div>
   <div class="bar"><i id="hpfill"></i><span id="hptxt"></span></div>
   <div class="bar"><i id="xpfill"></i><span id="xptxt"></span></div>
+  <div class="bar"><i id="spfill"></i><span id="sptxt"></span></div>
   <div id="dmgline"></div>
 </div>
 
+<div id="roundbar">⏱ <span id="roundtime">--:--</span></div>
+
 <div id="boards">
   <div id="online">🟢 — online</div>
+  <div class="board"><h3>💀 Placar · Abates<small>vence a rodada</small></h3><ol id="killBoard"></ol></div>
   <div class="board"><h3>🏆 Ranking · Nível</h3><ol id="lvlBoard"></ol></div>
-  <div class="board"><h3>💀 Ranking · Abates<small>vale só enquanto você viver</small></h3><ol id="killBoard"></ol></div>
 </div>
 <div id="feed"></div>
 <div id="conn">reconectando ao servidor...</div>
@@ -176,7 +196,7 @@ socket.on('state', s => {
 socket.on('killed', d => {
   const el = document.getElementById('death');
   document.getElementById('deathInfo').textContent =
-    'Abatido por '+d.by+'. Seu XP foi para o vencedor e seus abates zeraram.';
+    'Abatido por '+d.by+'. Você perdeu 1 abate no placar, mas volta rápido.';
   el.style.display='flex';
   const timerEl = document.getElementById('deathTimer');
   const iv = setInterval(()=>{
@@ -195,6 +215,20 @@ socket.on('log', msg => {
   setTimeout(()=>{ if(div.parentNode) div.remove(); }, 8000);
 });
 
+socket.on('roundover', winner => {
+  const el = document.getElementById('roundover');
+  document.getElementById('winnerInfo').innerHTML = winner
+    ? '🏆 <b>'+winner.name+'</b> venceu com <b>'+winner.kills+'</b> abates!'
+    : 'Ninguém pontuou nesta rodada.';
+  el.style.display='flex';
+  const nr = document.getElementById('nextRound');
+  const iv = setInterval(()=>{
+    if (!state || !state.round || state.round.phase!=='intermission'){ clearInterval(iv); el.style.display='none'; return; }
+    const left = Math.max(0,(state.round.endsAt-Date.now())/1000);
+    nr.textContent = 'Nova rodada em '+left.toFixed(0)+'s... (placar zera)';
+  },200);
+});
+
 /* ---------- input ---------- */
 const keys = {};
 let lastDir = {x:0,y:0};
@@ -210,8 +244,7 @@ function sendDir(){
 }
 addEventListener('keydown', e=>{
   const k = e.key.toLowerCase();
-  if (k===' '){ e.preventDefault(); if(joined){ socket.emit('dash'); } return; }
-  if (k==='m'){ return; }
+  if (k===' '){ e.preventDefault(); if(joined) socket.emit('special',{x:cam.x+mouse.x,y:cam.y+mouse.y}); return; }
   keys[k]=true; sendDir();
 });
 addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; sendDir(); });
@@ -223,14 +256,16 @@ cv.addEventListener('mousemove', e=>{
 function pressAttack(){
   if (!joined) return;
   holding = true;
-  // dispara o primeiro golpe na hora e liga o auto-attack no servidor
   socket.emit('attack', {x:cam.x+mouse.x, y:cam.y+mouse.y, hold:true});
 }
 function releaseAttack(){
   holding = false;
   if (joined) socket.emit('release');
 }
-cv.addEventListener('mousedown', e=>{ if(e.button===0) pressAttack(); });
+cv.addEventListener('mousedown', e=>{
+  if (e.button===0) pressAttack();
+  else if (e.button===2){ e.preventDefault(); if(joined) socket.emit('special',{x:cam.x+mouse.x,y:cam.y+mouse.y}); }
+});
 addEventListener('mouseup', e=>{ if(e.button===0) releaseAttack(); });
 cv.addEventListener('mouseleave', releaseAttack);
 addEventListener('blur', releaseAttack);
@@ -317,11 +352,20 @@ function draw(t, dt){
   }
 
   // jogadores
-  const topLvl = state.players.reduce((mx,p)=>Math.max(mx,p.alive?p.level:0),0);
+  let topKills = 0, leaderId = null;
+  for (const p of state.players) if (p.kills > topKills){ topKills = p.kills; leaderId = p.id; }
   for (const p of state.players){
     if (!p.alive) continue;
     const r = lerpEnt(p.id, p.x, p.y, dt);
     const c = CLASSES[p.cls];
+    // anel da Nova Arcana (expande rápido ao usar)
+    if (p.nova){
+      const age = (Date.now()-p.nova)/400;
+      if (age>=0 && age<=1){
+        ctx.strokeStyle='rgba(189,161,255,'+(0.8*(1-age))+')'; ctx.lineWidth=6;
+        ctx.beginPath(); ctx.arc(r.x,r.y,220*age,0,7); ctx.stroke();
+      }
+    }
     if (p.inv){
       ctx.strokeStyle='rgba(150,210,255,.8)'; ctx.lineWidth=2.5;
       ctx.beginPath(); ctx.arc(r.x,r.y,24+Math.sin(t/120)*2,0,7); ctx.stroke();
@@ -332,14 +376,11 @@ function draw(t, dt){
     ctx.lineWidth=3; ctx.strokeStyle = p.id===myId?'#ffd968':'#26190c'; ctx.stroke();
     if (p.cls==='knight'){
       ctx.fillStyle='#7d8694'; ctx.fillRect(r.x-10,r.y-7,20,5);
-      // detecta um novo golpe: anima só quando o swing MUDA para um valor novo.
-      // Na primeira vez que vemos o knight, registramos o swing atual SEM animar
-      // (senão todo knight "dá um golpe fantasma" ao surgir na tela).
       let sd = swingAnim.get(p.id);
       if (!sd){ sd = {serverSwing:p.swing, localStart:-1e9}; swingAnim.set(p.id, sd); }
       else if (p.swing && p.swing !== sd.serverSwing){ sd.serverSwing = p.swing; sd.localStart = t; }
       const sw = Math.max(0, 1-(t-sd.localStart)/180);
-      const sa = ang + (sw>0 ? (-0.9+1.8*(1-sw)) : 0.35);   // sw=0 => espada em repouso
+      const sa = ang + (sw>0 ? (-0.9+1.8*(1-sw)) : 0.35);
       ctx.strokeStyle='#e8e8ee'; ctx.lineWidth=4;
       ctx.beginPath(); ctx.moveTo(r.x+Math.cos(sa)*12, r.y+Math.sin(sa)*12);
       ctx.lineTo(r.x+Math.cos(sa)*40, r.y+Math.sin(sa)*40); ctx.stroke();
@@ -356,8 +397,13 @@ function draw(t, dt){
       ctx.fillStyle='#bda1ff';
       ctx.beginPath(); ctx.arc(r.x+Math.cos(ang)*30, r.y+Math.sin(ang)*30, 4.5, 0, 7); ctx.fill();
     }
+    // estrelas de atordoamento
+    if (p.stun){
+      ctx.fillStyle='#ffe27a'; ctx.font='12px monospace'; ctx.textAlign='center';
+      ctx.fillText('✦ ✦', r.x, r.y-22);
+    }
     drawBar(r.x, r.y-30, p.hp/p.hpMax, 44);
-    const crown = (p.level===topLvl && topLvl>1) ? '👑 ' : '';
+    const crown = (p.id===leaderId && topKills>0) ? '👑 ' : '';
     label(r.x, r.y-37, crown+(p.id===myId?'★ ':'')+p.name+' · nv'+p.level, p.id===myId?'#ffe27a':'#f4ead0', 11);
   }
 
@@ -422,9 +468,21 @@ function updateHud(){
   const cur=m.xpCur, next=m.xpNext;
   document.getElementById('xpfill').style.width=(100*(m.xp-cur)/Math.max(1,next-cur))+'%';
   document.getElementById('xptxt').textContent=m.xp+' / '+next+' XP';
-  let line = 'Dano: '+m.dmg+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
-  if (m.cls==='knight') line += ' · Investida: '+(m.dash>0 ? (m.dash/1000).toFixed(1)+'s' : 'pronta');
-  document.getElementById('dmgline').textContent = line;
+  // barra do especial: enche conforme recarrega
+  const ready = m.spCd<=0;
+  document.getElementById('spfill').style.width=(ready?100:100*(1-m.spCd/m.spMax))+'%';
+  document.getElementById('sptxt').textContent= ready ? '✦ ESPECIAL PRONTO (botão direito)' : 'Especial: '+(m.spCd/1000).toFixed(1)+'s';
+  document.getElementById('dmgline').textContent = 'Dano: '+m.dmg+' · Abates: '+m.kills+' · Mortes: '+m.deaths;
+  // timer da rodada
+  if (state.round){
+    const left = Math.max(0,(state.round.endsAt-Date.now())/1000);
+    const mm = Math.floor(left/60), ss = Math.floor(left%60);
+    const rb = document.getElementById('roundbar');
+    rb.style.display='block';
+    document.getElementById('roundtime').textContent =
+      (state.round.phase==='playing' ? mm+':'+(ss<10?'0':'')+ss : 'intervalo');
+    rb.classList.toggle('urgent', state.round.phase==='playing' && left<=30);
+  }
 }
 function boardHtml(list, fn){
   return list.slice(0,7).map(p=>
@@ -432,10 +490,10 @@ function boardHtml(list, fn){
 }
 function updateBoards(){
   document.getElementById('online').textContent = '🟢 '+state.online+' online';
+  const byKill=[...state.players].sort((a,b)=>b.kills-a.kills||b.level-a.level);
   const byLvl=[...state.players].sort((a,b)=>b.level-a.level||b.xp-a.xp);
-  const byKill=[...state.players].filter(p=>p.alive).sort((a,b)=>b.kills-a.kills||b.level-a.level);
-  document.getElementById('lvlBoard').innerHTML=boardHtml(byLvl,p=>'nv '+p.level);
   document.getElementById('killBoard').innerHTML=boardHtml(byKill,p=>p.kills+' ⚔')||'<li><span>—</span></li>';
+  document.getElementById('lvlBoard').innerHTML=boardHtml(byLvl,p=>'nv '+p.level);
 }
 
 /* ---------- início ---------- */

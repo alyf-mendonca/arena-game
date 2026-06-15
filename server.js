@@ -39,51 +39,55 @@ const ADMIN_PATH = process.env.ADMIN_PATH || '/123921839128398213912389213';
 const W = 3600, H = 3600;
 const TICK_MS = 1000 / 30;
 const BROADCAST_EVERY = 2;
-const DASH_CD = 2500, DASH_DIST = 140;
+
+/* RODADA: jogo em turnos de 10 min, vence quem tiver mais ABATES de PVP. */
+const ROUND_MS = 10 * 60 * 1000;
+const INTERMISSION_MS = 15 * 1000;       // tela de vencedor entre rodadas
+
+/* NOVA FILOSOFIA (v4): habilidade > level.
+   - Combate letal: ~5 acertos matam, entre QUAISQUER níveis.
+   - HP de uma classe = hitsToKill × dano da classe oposta (quase fixo).
+   - Level quase não muda o dano; dá um pouco de HP e adianta o especial.
+   - Especial no botão direito, cooldown 10s: define o jogo. */
+const HITS_TO_KILL = 5;                   // quantos acertos do oponente te matam
 
 // Editável pelo painel admin em tempo real:
 const CLASSES = {
-  knight: { hp: 300, dmg: 12, regen: 0.010, speed: 185, range: 56,  atkMs: 300, hpGrow: 1.0, projSpeed: 0 },
-  wizard: { hp: 100, dmg: 3,  regen: 0.020, speed: 205, range: 640, atkMs: 480, hpGrow: 1.0, projSpeed: 560 }
+  knight: { dmg: 20, regen: 0.012, speed: 190, range: 60,  atkMs: 360, projSpeed: 0,   special: 'charge' },
+  wizard: { dmg: 16, regen: 0.020, speed: 210, range: 600, atkMs: 520, projSpeed: 580, special: 'nova' }
 };
+/* HP base de cada classe é derivado: aguentar HITS_TO_KILL golpes do oponente.
+   Knight apanha do wizard (16) e o wizard apanha do knight (20). Damos ao knight
+   um bônus de tankiness (1.5×) pra manter a sua métrica de knight mais resistente. */
+const KNIGHT_TANK = 1.25;
+function baseHp(cls){
+  if (cls === 'knight') return Math.round(HITS_TO_KILL * CLASSES.wizard.dmg * KNIGHT_TANK);
+  return Math.round(HITS_TO_KILL * CLASSES.knight.dmg);
+}
+
 const BALANCE = {
-  growth: 1.22,           // +22% de dano e HP por nível (substitui o "dobra")
-  xpGrowth: 1.55,         // quanto o custo de XP de cada nível cresce
-  speedNerfStart: 6,
-  speedNerfPerLvl: 0.03,
-  speedNerfMax: 0.15,
-  leaderDmgPerLvl: 0.10,
-  leaderDmgMax: 0.40,
+  hpPerLvl: 0.05,         // +5% de HP por nível (level dá só uma vantagem leve)
+  dmgPerLvl: 0.015,       // +1,5% de dano por nível (quase nada — habilidade manda)
+  xpGrowth: 1.45,
+  specialCd: 10000,
+  specialCdPerLvl: 400,
+  deathPenalty: 1,
   minBounty: 5
 };
 
-/* CURVA DE CRESCIMENTO (v3)
-   Antes dano/HP dobravam (2^(l-1)) — instável, quebrava o jogo no late game.
-   Agora crescem suave: GROWTH^(l-1). GROWTH=1.22 => +22% por nível.
-   Editável ao vivo pelo painel admin (BALANCE.growth).
-   HP segue a MESMA curva => nº de golpes p/ matar fica estável entre níveis,
-   o que conserta o "monstro intocável" na raiz. */
-const growthPow = l => Math.pow(BALANCE.growth, l - 1);
-// XP p/ subir cresce um pouco mais rápido que o poder, pra cada nível custar:
 const XP_LVL = l => Math.round(20 * (Math.pow(BALANCE.xpGrowth, l - 1) - 1) / (BALANCE.xpGrowth - 1));
 const levelFromXp = xp => { let l = 1; while (xp >= XP_LVL(l + 1)) l++; return l; };
-const dmgAt = (b, l) => b * growthPow(l);
+const dmgAt = (b, l) => b * (1 + BALANCE.dmgPerLvl * (l - 1));            // dano quase plano
 const monsterWorth = l => Math.max(BALANCE.minBounty, Math.round(0.5 * (XP_LVL(l + 1) - XP_LVL(l))));
-const hpMaxFor = (cls, l) => Math.round(CLASSES[cls].hp * Math.pow(CLASSES[cls].hpGrow * BALANCE.growth, l - 1));
-function speedAt(p) {
-  const base = CLASSES[p.cls].speed;
-  if (p.level < BALANCE.speedNerfStart) return base;
-  const nerf = Math.min(BALANCE.speedNerfMax, BALANCE.speedNerfPerLvl * (p.level - BALANCE.speedNerfStart + 1));
-  return base * (1 - nerf);
-}
+const hpMaxFor = (cls, l) => Math.round(baseHp(cls) * (1 + BALANCE.hpPerLvl * (l - 1)));
+const specialCdFor = p => Math.max(5000, BALANCE.specialCd - BALANCE.specialCdPerLvl * (p.level - 1));
+const speedAt = p => CLASSES[p.cls].speed;   // velocidade fixa: agilidade é skill, não level
 
-/* hits = golpes para matar usando o DANO MÉDIO das classes (não só o knight).
-   Antes era calibrado pelo knight (base 8), o que deixava o wizard penando ~27
-   golpes num mob básico. Agora normal morre em ~4 golpes médios, ágil. */
+/* Monstros: PVM dinâmico. HP calibrado em "golpes médios" pra morrerem rápido. */
 const TIER = {
   normal: { hits: 4,  r: 14, speed: 95, aggro: 260, names: ['Goblin', 'Lobo', 'Esqueleto'] },
-  elite:  { hits: 11, r: 20, speed: 85, aggro: 330, names: ['Ogro', 'Troll', 'Espectro'] },
-  boss:   { hits: 34, r: 28, speed: 72, aggro: 1e9, names: ['Dragão', 'Lich', 'Behemoth'] }
+  elite:  { hits: 9,  r: 20, speed: 85, aggro: 330, names: ['Ogro', 'Troll', 'Espectro'] },
+  boss:   { hits: 22, r: 28, speed: 74, aggro: 1e9, names: ['Dragão', 'Lich', 'Behemoth'] }
 };
 
 /* ---------------- estado ---------------- */
@@ -97,6 +101,9 @@ const projectiles = [];
 let fx = [];
 let nextId = 1;
 const now = () => Date.now();
+
+/* estado da rodada: 'playing' por 10 min, depois 'intermission' mostrando o vencedor */
+const round = { phase: 'playing', endsAt: now() + ROUND_MS, winner: null };
 
 function freeSpot() {
   for (let t = 0; t < 60; t++) {
@@ -117,21 +124,21 @@ function makePlayer(name, cls, socketId) {
     hpMax: hpMaxFor(cls, 1), hp: hpMaxFor(cls, 1),
     xp: 0, level: 1, kills: 0, deaths: 0,
     alive: true, invulnUntil: now() + 2500,
-    lastAtk: 0, lastDash: 0, lastRegen: now(), respawnAt: 0, swing: 0,
-    holding: false, aimX: s.x, aimY: s.y
+    lastAtk: 0, lastSpecial: -1e9, lastRegen: now(), respawnAt: 0, swing: 0,
+    stunUntil: 0, kbX: 0, kbY: 0,           // atordoamento e empurrão (knockback)
+    chargeUntil: 0, chargeHit: false,       // estado da Investida do knight
+    holding: false, aimX: s.x, aimY: s.y, special: 0
   };
   players.set(p.id, p);
   return p;
 }
 function respawn(p) {
   const s = freeSpot();
-  p.x = s.x; p.y = s.y; p.xp = 0; p.level = 1;
-  p.hpMax = hpMaxFor(p.cls, 1); p.hp = p.hpMax;
-  p.alive = true; p.invulnUntil = now() + 2500;
-}
-function arenaMedian() {
-  const lv = [...players.values()].map(p => p.level).sort((a, b) => a - b);
-  return lv.length ? lv[Math.floor(lv.length / 2)] : 1;
+  // Rodada baseada em habilidade: mantém level/xp ganhos; a morte custa ABATES.
+  p.x = s.x; p.y = s.y;
+  p.hpMax = hpMaxFor(p.cls, p.level); p.hp = p.hpMax;
+  p.alive = true; p.invulnUntil = now() + 2000;
+  p.stunUntil = 0; p.kbX = 0; p.kbY = 0; p.holding = false;
 }
 function arenaMaxLevel() {
   let m = 1;
@@ -140,29 +147,30 @@ function arenaMaxLevel() {
 }
 
 /* ---------------- monstros ---------------- */
+function avgPlayerLevel() {
+  let sum = 0, n = 0;
+  for (const p of players.values()) { sum += p.level; n++; }
+  return n ? Math.max(1, Math.round(sum / n)) : 1;
+}
 function spawnMonster() {
-  const med = arenaMedian(), roll = Math.random();
+  const med = avgPlayerLevel(), roll = Math.random();
   let tier = roll < 0.6 ? 'normal' : roll < 0.9 ? 'elite' : 'boss';
   if (tier === 'boss' && [...monsters.values()].some(m => m.tier === 'boss')) tier = 'elite';
   const l = tier === 'normal' ? Math.max(1, med - (Math.random() < 0.5 ? 1 : 0))
           : tier === 'elite' ? med + 1
-          : arenaMaxLevel() + 2;                       // boss escala pelo MAIOR nível
-  // dano médio de referência das classes (knight + wizard) / 2, no nível do mob
-  const refDmg = (CLASSES.knight.dmg + CLASSES.wizard.dmg) / 2 * growthPow(l);
+          : arenaMaxLevel() + 2;
+  // dano médio de referência das classes no nível do mob (dano quase plano agora)
+  const refDmg = (dmgAt(CLASSES.knight.dmg, l) + dmgAt(CLASSES.wizard.dmg, l)) / 2;
   const T = TIER[tier], hp = Math.round(T.hits * refDmg), s = freeSpot();
   const m = {
     id: 'm' + (nextId++), name: T.names[Math.floor(Math.random() * 3)], tier, level: l,
     x: s.x, y: s.y, r: T.r, hpMax: hp, hp,
     dmg: Math.round(0.5 * refDmg), worth: monsterWorth(l),
     lastAtk: 0, botNext: 0, targetId: null, wanderX: s.x, wanderY: s.y,
-    // boss:
     nextSlam: now() + 4000, nextBolt: 0, cast: null, enraged: false
   };
   monsters.set(m.id, m);
-  if (tier === 'boss') {
-    io.emit('log', `👑 Um ${m.name} nível ${l} despertou! Ele caça o mais forte da arena.`);
-    addFx(m.x, m.y - 50, 'RUGIDO', '#ff6a5e', true, 'roar');
-  }
+  if (tier === 'boss') io.emit('log', `👑 Um ${m.name} nível ${l} despertou! Ele caça o mais forte da arena.`);
 }
 function ensureMonsters() {
   const target = Math.max(8, 2 * players.size);
@@ -175,48 +183,55 @@ function applyDamage(victim, dmg, attacker) {
   const isPlayer = victim.cls !== undefined;
   if (isPlayer && !victim.alive) return;
   if (isPlayer && t < victim.invulnUntil) { addFx(victim.x, victim.y - 26, 'escudo', '#9fd6ff'); return; }
-  // líder muito acima da mediana toma dano extra (mecânica de comeback)
-  if (isPlayer) {
-    const over = victim.level - arenaMedian();
-    if (over >= 2) dmg *= 1 + Math.min(BALANCE.leaderDmgMax, BALANCE.leaderDmgPerLvl * (over - 1));
-  }
   victim.hp -= dmg;
   addFx(victim.x + (Math.random() * 20 - 10), victim.y - 22, '-' + Math.round(dmg), '#ffd45e', false, 'hit');
   if (victim.hp <= 0) kill(victim, attacker);
 }
+// aplica atordoamento + empurrão (usado pelos especiais)
+function applyStun(victim, ms, fromX, fromY, force) {
+  if (victim.cls === undefined) { // monstro: só empurra levemente
+    const a = Math.atan2(victim.y - fromY, victim.x - fromX);
+    victim.x += Math.cos(a) * force * 0.5; victim.y += Math.sin(a) * force * 0.5;
+    return;
+  }
+  if (now() < victim.invulnUntil) return;
+  victim.stunUntil = Math.max(victim.stunUntil, now() + ms);
+  const a = Math.atan2(victim.y - fromY, victim.x - fromX);
+  victim.kbX = Math.cos(a) * force; victim.kbY = Math.sin(a) * force;
+}
 function kill(victim, attacker) {
   const isPlayer = victim.cls !== undefined;
   if (attacker && attacker.cls !== undefined) {
-    if (isPlayer) attacker.kills++;
-    const gain = isPlayer ? Math.max(BALANCE.minBounty, victim.xp) : victim.worth;
-    // só bloqueia farmar quem está MUITO abaixo; matar acima sempre vale
+    const gain = isPlayer ? Math.max(BALANCE.minBounty, victim.xp ? Math.round(victim.xp * 0.3) : BALANCE.minBounty) : victim.worth;
+    // PVP conta como ABATE no placar da rodada; matar quem está 4+ abaixo não dá XP
+    if (isPlayer) {
+      attacker.kills++;
+      addFx(attacker.x, attacker.y - 48, 'ABATE!', '#ff7a7a', true, 'kill');
+    }
     const allowed = (attacker.level - victim.level) <= 3;
     if (allowed && gain > 0) {
       attacker.xp += gain;
-      addFx(attacker.x, attacker.y - 40, '+' + Math.round(gain) + ' XP', '#9cff7a', true, 'xp');
       const nl = levelFromXp(attacker.xp);
       if (nl > attacker.level) {
         attacker.level = nl;
         attacker.hpMax = hpMaxFor(attacker.cls, nl);
-        attacker.hp = attacker.hpMax;        // sobe de nível => vida cheia
-        attacker.lastRegen = now();          // reinicia o ciclo de regen
+        attacker.hp = attacker.hpMax;
+        attacker.lastRegen = now();
         addFx(attacker.x, attacker.y - 64, 'NÍVEL ' + nl + '!', '#ffe27a', true, 'lvl');
-        addFx(attacker.x, attacker.y - 84, 'vida restaurada', '#7affb0', false);
-        io.emit('log', `⬆ ${attacker.name} alcançou o nível ${nl}!`);
+        io.emit('log', `⬆ ${attacker.name} chegou ao nível ${nl} (especial mais rápido!)`);
       }
-    } else if (gain > 0) {
-      addFx(attacker.x, attacker.y - 40, 'sem XP (vítima 4+ abaixo)', '#c8c8c8');
     }
   }
   if (isPlayer) {
     victim.alive = false; victim.hp = 0; victim.deaths++;
-    victim.kills = 0;                      // ranking de abates só vale em vida
-    victim.respawnAt = now() + 3000;
+    victim.kills = Math.max(0, victim.kills - BALANCE.deathPenalty);   // morrer custa abates
+    victim.holding = false;
+    victim.respawnAt = now() + 2500;
     const killerName = attacker ? attacker.name : 'a arena';
-    io.emit('log', `💀 ${victim.name} (nv${victim.level}) caiu para ${killerName}`);
+    io.emit('log', `💀 ${victim.name} caiu para ${killerName} (−${BALANCE.deathPenalty} abate)`);
     if (victim.socketId) io.to(victim.socketId).emit('killed', { by: killerName, respawnAt: victim.respawnAt });
   } else {
-    if (victim.tier === 'boss') io.emit('log', `👑 ${attacker ? attacker.name : '???'} deu o golpe final no ${victim.name}!`);
+    if (victim.tier === 'boss') io.emit('log', `👑 ${attacker ? attacker.name : '???'} derrubou o ${victim.name}!`);
     monsters.delete(victim.id);
     setTimeout(ensureMonsters, 2500);
   }
@@ -251,16 +266,48 @@ function attack(p, tx, ty) {
     });
   }
 }
-function dash(p) {
+// ESPECIAL (botão direito, cooldown ~10s, reduz com level)
+function useSpecial(p, tx, ty) {
   const t = now();
-  if (!p.alive || p.cls !== 'knight' || t - p.lastDash < DASH_CD) return;
-  p.lastDash = t;
-  let dx = p.dirX, dy = p.dirY;
-  if (!dx && !dy) { dx = Math.cos(p.ang); dy = Math.sin(p.ang); }
-  const n = Math.hypot(dx, dy) || 1;
-  // avança em passos para respeitar colisão
-  for (let i = 0; i < 7; i++) moveEntity(p, dx / n * DASH_DIST / 7, dy / n * DASH_DIST / 7);
-  addFx(p.x, p.y - 10, '»', '#cfe2ff', false, 'dash');
+  if (!p.alive || t < p.stunUntil) return;
+  if (t - p.lastSpecial < specialCdFor(p)) return;
+  p.lastSpecial = t;
+  if (Number.isFinite(tx) && Number.isFinite(ty)) p.ang = Math.atan2(ty - p.y, tx - p.x);
+
+  if (p.cls === 'knight') {
+    // INVESTIDA BRUTAL: avança forte na direção da mira; primeiro acerto atordoa + dano pesado
+    const ang = p.ang, DIST = 230;
+    for (let i = 0; i < 9; i++) moveEntity(p, Math.cos(ang) * DIST / 9, Math.sin(ang) * DIST / 9);
+    addFx(p.x, p.y, 'INVESTIDA', '#cfe2ff', true, 'charge');
+    const dmg = dmgAt(CLASSES.knight.dmg, p.level) * 1.8;
+    let best = null, bd = 90;
+    const scan = o => {
+      if (o === p || o.alive === false) return;
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
+      if (d < bd) { bd = d; best = o; }
+    };
+    for (const o of players.values()) scan(o);
+    for (const m of monsters.values()) scan(m);
+    if (best) {
+      applyStun(best, 1100, p.x, p.y, 70);
+      applyDamage(best, dmg, p);
+      addFx(best.x, best.y - 30, 'ATORDOADO!', '#ffd14e', true);
+    }
+  } else {
+    // NOVA ARCANA: explosão em volta do mago, empurra e fere todos por perto (disengage)
+    const R = 220, dmg = dmgAt(CLASSES.wizard.dmg, p.level) * 1.4;
+    addFx(p.x, p.y, 'NOVA ARCANA', '#bda1ff', true, 'nova');
+    const scan = o => {
+      if (o === p || o.alive === false) return;
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
+      if (d > R) return;
+      applyStun(o, 500, p.x, p.y, 150);
+      applyDamage(o, dmg, p);
+    };
+    for (const o of players.values()) scan(o);
+    for (const m of monsters.values()) scan(m);
+    p.novaFx = t;   // marca p/ desenhar o anel no cliente
+  }
 }
 
 
@@ -403,6 +450,40 @@ function bossTick(m, dt, t) {
   }
 }
 
+/* ---------------- rodada ---------------- */
+function updateRound(t) {
+  if (round.phase === 'playing') {
+    if (t >= round.endsAt) {
+      // fim da rodada: vencedor = mais abates (desempate: maior nível)
+      let win = null;
+      for (const p of players.values()) {
+        if (!win || p.kills > win.kills || (p.kills === win.kills && p.level > win.level)) win = p;
+      }
+      round.winner = win ? { name: win.name, kills: win.kills, cls: win.cls } : null;
+      round.phase = 'intermission';
+      round.endsAt = t + INTERMISSION_MS;
+      const msg = round.winner
+        ? `🏆 Fim da rodada! Vencedor: ${round.winner.name} com ${round.winner.kills} abates!`
+        : '🏁 Fim da rodada!';
+      io.emit('log', msg);
+      io.emit('roundover', round.winner);
+    }
+  } else { // intermission
+    if (t >= round.endsAt) {
+      // reset geral: zera placar e progresso, nova rodada
+      for (const p of players.values()) {
+        p.kills = 0; p.deaths = 0; p.xp = 0; p.level = 1;
+        p.hpMax = hpMaxFor(p.cls, 1); p.hp = p.hpMax;
+        p.lastSpecial = -1e9; p.stunUntil = 0; p.kbX = 0; p.kbY = 0;
+        const s = freeSpot(); p.x = s.x; p.y = s.y; p.alive = true; p.invulnUntil = t + 2500;
+      }
+      monsters.clear(); ensureMonsters();
+      round.phase = 'playing'; round.endsAt = t + ROUND_MS; round.winner = null;
+      io.emit('log', '⚔ Nova rodada! 10 minutos. Mais abates vence!');
+    }
+  }
+}
+
 /* ---------------- loop principal ---------------- */
 let tickCount = 0, lastTick = now();
 setInterval(() => {
@@ -416,6 +497,14 @@ setInterval(() => {
       p.lastRegen = t;
       p.hp = Math.min(p.hpMax, p.hp + p.hpMax * CLASSES[p.cls].regen);
     }
+    // knockback decai mesmo durante o atordoamento
+    if (p.kbX || p.kbY) {
+      moveEntity(p, p.kbX, p.kbY);
+      p.kbX *= 0.8; p.kbY *= 0.8;
+      if (Math.abs(p.kbX) < 0.5) p.kbX = 0;
+      if (Math.abs(p.kbY) < 0.5) p.kbY = 0;
+    }
+    if (t < p.stunUntil) continue;            // atordoado: não move nem ataca
     if (p.dirX || p.dirY) moveEntity(p, p.dirX * speedAt(p) * dt, p.dirY * speedAt(p) * dt);
     if (p.holding) attack(p, p.aimX, p.aimY);   // auto-attack: cadência limitada dentro de attack()
   }
@@ -443,19 +532,22 @@ setInterval(() => {
     if (hit) projectiles.splice(i, 1);
   }
 
-  if (tickCount % 150 === 0) ensureMonsters();   // ajusta população a cada 5s
+  if (tickCount % 150 === 0) ensureMonsters();
+  updateRound(t);
 
   if (++tickCount % BROADCAST_EVERY === 0) {
     io.emit('state', {
       t,
       online: players.size,
+      round: { phase: round.phase, endsAt: round.endsAt, winner: round.winner },
       players: [...players.values()].map(p => ({
         id: p.id, name: p.name, cls: p.cls, x: Math.round(p.x), y: Math.round(p.y),
         hp: Math.ceil(p.hp), hpMax: p.hpMax, level: p.level, xp: Math.round(p.xp),
         xpCur: XP_LVL(p.level), xpNext: XP_LVL(p.level + 1), dmg: Math.round(dmgAt(CLASSES[p.cls].dmg, p.level)),
         kills: p.kills, deaths: p.deaths, alive: p.alive,
-        inv: t < p.invulnUntil, ang: +p.ang.toFixed(2), swing: p.swing,
-        dash: p.cls === 'knight' ? Math.max(0, p.lastDash + DASH_CD - t) : 0
+        inv: t < p.invulnUntil, stun: t < p.stunUntil, ang: +p.ang.toFixed(2), swing: p.swing,
+        nova: (p.novaFx && t - p.novaFx < 400) ? p.novaFx : 0,
+        spCd: Math.max(0, p.lastSpecial + specialCdFor(p) - t), spMax: specialCdFor(p)
       })),
       monsters: [...monsters.values()].map(m => ({
         id: m.id, name: m.name, tier: m.tier, level: m.level,
@@ -497,7 +589,7 @@ io.on('connection', socket => {
   });
   socket.on('aim', d => { if (me && d) { me.aimX = +d.x; me.aimY = +d.y; } });
   socket.on('release', () => { if (me) me.holding = false; });
-  socket.on('dash', () => { if (me) dash(me); });
+  socket.on('special', d => { if (me) useSpecial(me, d ? +d.x : me.aimX, d ? +d.y : me.aimY); });
   socket.on('disconnect', () => {
     if (!me) return;
     io.emit('log', `✕ ${me.name} deixou a arena`);
@@ -506,12 +598,12 @@ io.on('connection', socket => {
 });
 
 /* ---------------- painel admin escondido ---------------- */
-const EDITABLE = ['hp', 'dmg', 'regen', 'speed', 'range', 'atkMs', 'hpGrow', 'projSpeed'];
-const EDITABLE_BAL = ['growth', 'xpGrowth', 'speedNerfStart', 'speedNerfPerLvl', 'speedNerfMax', 'leaderDmgPerLvl', 'leaderDmgMax', 'minBounty'];
+const EDITABLE = ['dmg', 'regen', 'speed', 'range', 'atkMs', 'projSpeed'];
+const EDITABLE_BAL = ['hpPerLvl', 'dmgPerLvl', 'xpGrowth', 'specialCd', 'specialCdPerLvl', 'deathPenalty', 'minBounty'];
 
 app.get(ADMIN_PATH + '/config', (req, res) => {
   res.json({ classes: CLASSES, balance: BALANCE, online: players.size,
-    arena: { median: arenaMedian(), max: arenaMaxLevel(), monsters: monsters.size },
+    arena: { median: avgPlayerLevel(), max: arenaMaxLevel(), monsters: monsters.size },
     players: [...players.values()].map(p => ({ name: p.name, cls: p.cls, level: p.level, kills: p.kills, alive: p.alive })) });
 });
 app.post(ADMIN_PATH + '/config', (req, res) => {
@@ -526,7 +618,7 @@ app.post(ADMIN_PATH + '/config', (req, res) => {
   if (b.balance) for (const k of EDITABLE_BAL) {
     let v = +b.balance[k];
     if (!Number.isFinite(v) || v < 0) continue;
-    if (k === 'growth' || k === 'xpGrowth') v = Math.max(1.01, v); // precisa ser > 1
+    if (k === 'xpGrowth') v = Math.max(1.01, v); // precisa ser > 1
     BALANCE[k] = v;
   }
   // reaplica HP máximo aos vivos sem matar ninguém
@@ -563,10 +655,11 @@ td,th{border:1px solid #6b5a33;padding:4px 8px;text-align:left}
 <table id="ptable"><thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Abates</th><th>Vivo</th></tr></thead><tbody></tbody></table>
 <script>
 const BASE = location.pathname.replace(/\\/$/, '');
-const LBL = {hp:'HP base',dmg:'Dano base',regen:'Regen (fração/3s)',speed:'Velocidade',range:'Alcance (px)',
-atkMs:'Cooldown ataque (ms)',hpGrow:'HP × por nível',projSpeed:'Vel. projétil',
-speedNerfStart:'Nerf vel. a partir do nv',speedNerfPerLvl:'Nerf vel. por nível',speedNerfMax:'Nerf vel. máx',
-leaderDmgPerLvl:'Dano extra líder/nv',leaderDmgMax:'Dano extra líder máx',minBounty:'XP mínimo por kill'};
+const LBL = {dmg:'Dano base',regen:'Regen (fração/3s)',speed:'Velocidade',range:'Alcance (px)',
+atkMs:'Cooldown ataque (ms)',projSpeed:'Vel. projétil',
+hpPerLvl:'HP extra por nível',dmgPerLvl:'Dano extra por nível',xpGrowth:'Custo XP por nível',
+specialCd:'Cooldown especial (ms)',specialCdPerLvl:'Reduz especial/nível (ms)',
+deathPenalty:'Abates perdidos ao morrer',minBounty:'XP mínimo por kill'};
 let cfg=null;
 function field(group,key,val){return '<label>'+(LBL[key]||key)+'<input data-g="'+group+'" data-k="'+key+'" value="'+val+'"></label>';}
 function render(){
